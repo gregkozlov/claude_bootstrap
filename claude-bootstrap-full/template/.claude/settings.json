@@ -1,0 +1,217 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking the call against the repo's prohibitions"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recording the edit"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__claude-in-chrome__navigate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recording the browser check"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recording the agent launch"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/compact-pointer.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Naming the session's artifact folder"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/compact-pointer.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Restoring the session's artifact folder"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-registered.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking that this tree has a verification gate"
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/compact-pointer.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Naming the session's artifact folder"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Recording the agent run"
+          }
+        ]
+      }
+    ],
+    "InstructionsLoaded": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-loads.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git reset:*)",
+      "Bash(git rebase:*)",
+      "Bash(git merge:*)",
+      "Bash(git tag:*)",
+      "Bash(git cherry-pick:*)",
+      "Bash(git revert:*)",
+      "Bash(git am:*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git clean:*)",
+      "Bash(git stash)",
+      "Bash(git stash -*)",
+      "Bash(git stash push:*)",
+      "Bash(git stash save:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash apply:*)",
+      "Bash(git stash drop:*)",
+      "Bash(git stash clear:*)",
+      "Bash(git stash branch:*)",
+      "Bash(git stash create:*)",
+      "Bash(git stash store:*)",
+      "Bash(git stash import:*)",
+      "Bash(git stash export:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git update-ref:*)",
+      "PowerShell(git commit:*)",
+      "PowerShell(git push:*)",
+      "PowerShell(git pull:*)",
+      "PowerShell(git reset:*)",
+      "PowerShell(git rebase:*)",
+      "PowerShell(git merge:*)",
+      "PowerShell(git tag:*)",
+      "PowerShell(git cherry-pick:*)",
+      "PowerShell(git revert:*)",
+      "PowerShell(git am:*)",
+      "PowerShell(git checkout:*)",
+      "PowerShell(git restore:*)",
+      "PowerShell(git clean:*)",
+      "PowerShell(git stash)",
+      "PowerShell(git stash -*)",
+      "PowerShell(git stash push:*)",
+      "PowerShell(git stash save:*)",
+      "PowerShell(git stash pop:*)",
+      "PowerShell(git stash apply:*)",
+      "PowerShell(git stash drop:*)",
+      "PowerShell(git stash clear:*)",
+      "PowerShell(git stash branch:*)",
+      "PowerShell(git stash create:*)",
+      "PowerShell(git stash store:*)",
+      "PowerShell(git stash import:*)",
+      "PowerShell(git stash export:*)",
+      "PowerShell(git worktree remove:*)",
+      "PowerShell(git branch -D:*)",
+      "PowerShell(git update-ref:*)"
+    ],
+    "allow": [
+      "Bash(<CHECK_COMMAND>)",
+      "Bash(node .claude/scripts/rules-reach.mjs)",
+      "Bash(node .claude/scripts/rules-reach.mjs --check)",
+      "Bash(node .claude/scripts/rules-reach.mjs --loads:*)",
+      "Bash(node .claude/scripts/dev-servers.mjs)",
+      "Bash(node .claude/scripts/run-pure.mjs:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(npx tsc -p * --noEmit --tsBuildInfoFile *)",
+      "Bash(rm <SRC_DIR>/__hunt_probe.ts)",
+      "Bash(rm <SRC_DIR>/__hunt_probe2.ts)",
+      "Bash(rm <SRC_DIR>/__hunt_probe_integration.ts)",
+      "PowerShell(<CHECK_COMMAND>)",
+      "PowerShell(node .claude/scripts/rules-reach.mjs)",
+      "PowerShell(node .claude/scripts/rules-reach.mjs --check)",
+      "PowerShell(node .claude/scripts/rules-reach.mjs --loads:*)",
+      "PowerShell(node .claude/scripts/dev-servers.mjs)",
+      "PowerShell(node .claude/scripts/run-pure.mjs:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)",
+      "PowerShell(git show:*)",
+      "PowerShell(npx tsc -p * --noEmit --tsBuildInfoFile *)",
+      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe.ts)",
+      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe2.ts)",
+      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe_integration.ts)"
+    ]
+  }
+}

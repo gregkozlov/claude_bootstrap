@@ -1,0 +1,32 @@
+{
+  "env": {
+    "CLAUDE_CODE_MAX_RETRIES": "15"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/verify-gate.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Recording verification baseline"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/verify-gate.mjs\"",
+            "timeout": 150,
+            "statusMessage": "Verifying files changed this session"
+          }
+        ]
+      }
+    ]
+  }
+}

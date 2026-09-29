@@ -1,0 +1,10 @@
+{
+  "must": [
+    { "file": ".claude/hooks/record-activity.mjs", "rule": "session-artifacts", "needle": "The folder name is the only link" },
+    { "file": ".claude/scripts/rules-reach.mjs", "rule": "rules-reach", "needle": "every `must` pair names a file, a rule and a needle" }
+  ],
+  "mustNot": [
+    { "file": ".claude/hooks/guard.mjs", "rule": "session-artifacts" },
+    { "file": ".claude/hooks/guard.mjs", "rule": "rules-reach" }
+  ]
+}

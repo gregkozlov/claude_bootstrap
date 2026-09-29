@@ -1,0 +1,9 @@
+{
+  "PROJECT": "stockroom",
+  "STACK": "React 19 + TypeScript strict on Vite, MUI, TanStack Query v5, React Hook Form + Zod, Zustand, i18next, React Router v7, OpenAPI-generated API clients",
+  "SRC_DIR": "src",
+  "CHECK_COMMAND": "npm run check",
+  "DEV_PORT_RANGE": "5173-5179",
+  "DEV_BASE_PATH": "/stockroom/",
+  "GENERATED_PATHS": ["src/api/[^/]+/generated/", "\\.openapi\\.json$"]
+}
