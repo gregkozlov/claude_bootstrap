@@ -198,6 +198,22 @@ const cases = [
   // not writes
   ['truncate -s takes a size, not a path (allow)', 0, 'truncate -s 0 /tmp/log.txt'],
   ['arithmetic comparison (allow)', 0, 'echo $(( 3 > 2 ))'],
+  ['arithmetic with a variable (allow)', 0, 'echo $(( $a > 0 ))'],
+  ['arithmetic hiding a backtick rm (deny)', 2, 'echo $(( `rm -rf <SRC_DIR>` + 1 ))'],
+  // the stdin check reads only an interpreter that heads a command and gets its script on stdin
+  ['node --input-type module heredoc (deny)', 2, "node --input-type module <<'EOF'\nimport fs from 'node:fs'; fs.writeFileSync('<SRC_DIR>/a.ts','x')\nEOF"],
+  ['py -3 - heredoc (deny)', 2, "py -3 - <<'EOF'\nopen('<SRC_DIR>/a.ts','w').write('x')\nEOF"],
+  ['scratch heredoc naming node, then run (allow)', 0, `cat > ${S}/a.mjs <<'EOF'\nwalk(node);\nfs.writeFileSync(out, 'x');\nEOF\nnode ${S}/a.mjs`],
+  ['search filtered by grep -v node (allow)', 0, 'grep -rn "rmSync(" .claude/scripts | grep -v node'],
+  ['search, then node -v (allow)', 0, 'git log -S "writeFileSync(" --oneline | head; node -v'],
+  ['heredoc body line headed by node (allow)', 0, `cat > ${S}/b.mjs <<'EOF'\nconst deep = nodes.filter((node) => node.depth < 3);\nfs.writeFileSync(process.argv[2], 'x');\nEOF`],
+  ['node -r preload heredoc (deny)', 2, "node -r ./x.cjs <<'EOF'\nrequire('fs').writeFileSync('<SRC_DIR>/a.ts','x')\nEOF"],
+  ['search piped into python -c (allow)', 0, 'grep -rn "rmSync(" .claude | python -c "import sys; print(len(sys.stdin.read().splitlines()))"'],
+  ['a quoted << before a node heredoc (deny)', 2, `echo "feed it via <<EOF"\nnode <<'X'\nrequire('fs').writeFileSync('<SRC_DIR>/a.ts','x')\nX`],
+  ['a heredoc a shell reads, holding a node heredoc (deny)', 2, `bash <<'EOF'\nnode <<'X'\nrequire('fs').writeFileSync('<SRC_DIR>/a.ts','x')\nX\nEOF`],
+  ['a -c among the stdin script arguments (deny)', 2, "python - -c cfg.json <<'EOF'\nopen('<SRC_DIR>/a.ts','w').write('x')\nEOF"],
+  ['gh co (deny)', 2, 'gh co 12'],
+  ['git config edit (deny)', 2, 'git config edit --global'],
 ];
 
 let failed = 0;

@@ -34,7 +34,7 @@ The `references/weekly.md` step 1 commands, then measure into the task file:
    - check-command runs: count, duration, the leg that failed, re-runs with no edit in between;
    - hook and permission denials followed by a retry, and the calls each loop cost;
    - agent launches: type, model, prompt size, reply size, duration;
-   - rule loads from the `record-loads` log (`rules-reach.mjs --loads`, 15 days at most - the hook prunes older records), and which rule never loaded in that window; skill loads from the transcripts' `Skill` tool calls, and which skill never loaded in 30 days.
+   - rule loads from the `record-loads` log (`rules-reach.mjs --loads`, 15 days at most - the hook prunes older records), and which rule never loaded in that window; skill loads from the transcripts' `Skill` tool calls and their slash-command entries (`<command-name>`; a skill with `disable-model-invocation` leaves no other trace), and which skill never loaded in 30 days.
 3. **Ledger aggregates** - per agent type: launches (the `agents.md` rows the hook wrote), verdicts and findings accepted vs rejected (read from the verdict edits and the `task-*.md` findings, which have no fixed shape - a count you could not read is marked `HYPOTHESIS`).
 
 A finding that rests on neither the load map nor a number is marked `HYPOTHESIS`.

@@ -51,9 +51,16 @@ const GIT_GLOBAL_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '
 // A search tool's arguments are patterns and paths: it cannot commit, publish or edit, so its segment skips those tests.
 const SEARCH_COMMAND = /^(?:grep|egrep|fgrep|rg|ag|findstr|Select-String|sls)$/i;
 const GH_MUTATING =
-  /\bgh\s+(?:pr\s+(?:create|merge|close|edit|comment|delete|review|ready|reopen|lock|unlock)|issue\s+(?:create|close|edit|comment|delete|reopen|lock|unlock|pin|unpin|transfer|develop)|release\s+(?:create|delete|edit|upload)|repo\s+(?:create|delete|edit|fork|rename|archive|sync)|pr\s+checkout|gist\s+(?:create|edit|delete)|workflow\s+(?:run|enable|disable)|run\s+(?:rerun|cancel|delete)|(?:secret|variable)\s+(?:set|delete)|label\s+(?:create|edit|delete|clone))\b/;
-// An interpreter that takes its script on stdin (`python - <<'EOF'`, `node <<EOF`, `... | node`) runs the lines after it.
-const STDIN_INTERPRETER = /(?:^|[\s;&|(])(?:node|python[\d.]*|py|deno|bun)(?:\.exe)?(?:\s+-{1,2}[A-Za-z][\w-]*)*(?:\s+-)?\s*(?:<<|<\s*[^<\s]|[;&|)]|$)/m;
+  /\bgh\s+(?:pr\s+(?:create|merge|close|edit|comment|delete|review|ready|reopen|lock|unlock)|issue\s+(?:create|close|edit|comment|delete|reopen|lock|unlock|pin|unpin|transfer|develop)|release\s+(?:create|delete|edit|upload)|repo\s+(?:create|delete|edit|fork|rename|archive|sync)|pr\s+(?:checkout|update-branch)|co|gist\s+(?:create|edit|delete)|workflow\s+(?:run|enable|disable)|run\s+(?:rerun|cancel|delete)|(?:secret|variable)\s+(?:set|delete|remove)|label\s+(?:create|edit|delete|clone)|cache\s+delete)\b/;
+// The head of a command whose script may come on stdin (`python - <<'EOF'`, `node <<EOF`, `... | node`).
+const STDIN_INTERPRETER = /^(?:node|python[\d.]*|py|deno|bun)(?:\.exe)?$/i;
+const ARITHMETIC = /\$\(\((?:[^()$`]|\$(?!\()|\((?:[^()$`]|\$(?!\())*\))*\)\)/g;
+// Interpreter flags whose value is the next word, so it is not the script operand (`node -r ./pre.cjs <<EOF`).
+const STDIN_VALUE_FLAG =
+  /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions|--input-type|--title|-X|-W)$/;
+const ONE_LINER_FLAG = /^(?:-[ecpm]|-pe|--eval|--print)$/;
+// A shell, `eval`, `source` or `.` runs a heredoc body as a script, so with one in the command no body is blanked.
+const SHELL_READER = /(?:^|[\s;&|(`])(?:(?:[^\s#'"]*\/)?(?:bash|sh|zsh|dash|ksh|eval|source)(?:\.exe)?(?=[\s;&|)<>]|$)|\.(?=\s))/;
 const INTERPRETER_ONE_LINER =
   /\b(?:node(?:\.exe)?(?:\s+-{1,2}\w[\w-]*(?:=\S+)?)*?\s+(?:-e|--eval|-p|--print|-pe)|python[\d.]*(?:\.exe)?(?:\s+-[A-Za-z]+(?:\s+[^-\s]\S*)?)*?\s+-c|py(?:\s+-\S+)*?\s+-c|(?:pwsh|powershell)(?:\.exe)?(?:\s+-\w+(?:\s+[^-\s"']\S*)?)*?\s+-c(?:ommand)?|iex|Invoke-Expression)\b/i;
 const SCRIPT_WRITE =
@@ -446,9 +453,11 @@ function stripLeading(input) {
 
 function isConfigRead(rest) {
   if (rest.some((token) => /^(?:--add|--unset|--unset-all|--replace-all|--rename-section|--remove-section|--edit|-e)$/.test(token))) return false;
+  // git 2.46+ spells both as subcommands: `git config get user.name`, `git config list`, `git config edit`.
+  const subcommand = rest.find((token, index) => !token.startsWith('-') && !/^(?:-f|--file|--blob|--type|--default|--comment)$/.test(rest[index - 1] ?? '')) ?? '';
+  if (/^(?:set|unset|rename-section|remove-section|edit)$/.test(subcommand)) return false;
   if (rest.some((token) => /^(?:--get|--get-all|--get-regexp|--get-urlmatch|--list|-l)$/.test(token))) return true;
-  // git 2.46+ spells the reads as subcommands: `git config get user.name`, `git config list`.
-  if (/^(?:get|get-all|get-regexp|get-urlmatch|list)$/.test(rest.find((token) => !token.startsWith('-')) ?? '')) return true;
+  if (/^(?:get|get-all|get-regexp|get-urlmatch|list)$/.test(subcommand)) return true;
   return rest.filter((token) => !token.startsWith('-')).length <= 1;
 }
 
@@ -538,7 +547,7 @@ function moverArguments(tokens, context) {
       ) {
         const item = value();
         if (item !== undefined) destinations.push(item);
-      } else if ((powershell && VALUE_PARAMS.test(name) && !colon) || (/^truncate$/i.test(verb) && /^-[sr]$/.test(name) && !colon)) {
+      } else if ((powershell && VALUE_PARAMS.test(name) && !colon) || (/^truncate$/i.test(verb) && /^(?:-[sr]|--size|--reference)$/.test(name) && !colon)) {
         index += 1;
       }
       continue;
@@ -716,10 +725,65 @@ function checkChdir(command, shell) {
   }
 }
 
+// An interpreter heading a command reads its script on stdin when it is given `-`, or when a pipe, a heredoc or `<`
+// feeds it and it names no script file (`node`, `node --input-type module`). `node -v` alone reads nothing, and a
+// one-liner or `-m` runs its own code. A heredoc body is the fed script or data, never a command head.
+function readsScriptFromStdin(command, shell) {
+  const text = heredocBodiesBlanked(command, shell);
+  let from = 0;
+  return segments(text, shell).some((segment) => {
+    const at = text.indexOf(segment, from);
+    if (at >= 0) from = at + segment.length;
+    const [head, ...rest] = stripLeading(tokenize(segment.trim(), shell));
+    if (!STDIN_INTERPRETER.test((head ?? '').replace(/^.*[\\/]/, ''))) return false;
+    // Read up to the command's own end, not the segment's: `segments` also splits at the `&` of `2>&1`.
+    const own = text.slice(Math.max(at, 0)).split('\n')[0].split(/;|&&|\|/)[0];
+    const fed = (at > 0 && /(?:^|[^|])\|[&\s({]*$/.test(text.slice(0, at))) || /<<|(?:^|\s)\d?<\s*[^<\s(]/.test(own);
+    const words = [];
+    for (let index = 0; index < rest.length; index += 1) {
+      const redirect = /^\d*(<<<|<<-?|<|>>?|&>>?|>&)(.*)$/.exec(rest[index]);
+      if (redirect) {
+        if (!redirect[2]) index += 1;
+      } else {
+        words.push(rest[index]);
+        if (STDIN_VALUE_FLAG.test(rest[index])) index += 1;
+      }
+    }
+    // Only the interpreter's own flags, before `-` or the first operand: what follows is the script's arguments.
+    const end = words.findIndex((word) => word === '-' || !word.startsWith('-'));
+    if (words.slice(0, end < 0 ? words.length : end).some((word) => ONE_LINER_FLAG.test(word))) return false;
+    if (words.includes('-')) return true;
+    const operand = words.find((word) => !word.startsWith('-'));
+    return fed && (operand === undefined || !/[\\/]|\.(?:[cm]?[jt]sx?|py)$/i.test(operand));
+  });
+}
+
+// Each heredoc body and its terminator blanked line by line, so no body line is read as a command. Only a `<<`
+// outside quotes and comments opens one; a body that never ends, or one a shell reads, leaves the command as it is.
+function heredocBodiesBlanked(command, shell) {
+  if (shell !== 'Bash') return command;
+  const pending = [];
+  const blanked = command
+    .split('\n')
+    .map((line) => {
+      if (pending.length > 0) {
+        if (line.replace(/\r$/, '').replace(/^\t+/, '') === pending[0]) pending.shift();
+        return '';
+      }
+      const bare = unquoted(commentsBlanked(line, shell), shell);
+      for (const match of line.matchAll(/<<-?\s*\\?(['"]?)([\w.-]+)\1/g)) {
+        if (bare.startsWith('<<', match.index) && line[match.index - 1] !== '<') pending.push(match[2]);
+      }
+      return line;
+    })
+    .join('\n');
+  return pending.length > 0 || SHELL_READER.test(blanked) ? command : blanked;
+}
+
 function checkCommand(command, context, depth = 0) {
   if (typeof command !== 'string') return;
-  // Arithmetic `$(( a > b ))` compares, it does not redirect; one holding a `$(` keeps being checked.
-  if (context.shell === 'Bash') command = command.replace(/\$\(\((?:[^()$]|\([^()$]*\))*\)\)/g, (match) => ' '.repeat(match.length));
+  // Arithmetic `$(( $a > b ))` compares, it does not redirect; one holding a `$(` or a backtick keeps being checked.
+  if (context.shell === 'Bash') command = command.replace(ARITHMETIC, (match) => ' '.repeat(match.length));
   checkFind(command, context.shell);
   const bare = unquoted(command, context.shell);
   const escape = escapeChar(context.shell);
@@ -732,7 +796,7 @@ function checkCommand(command, context, depth = 0) {
     const args = callArguments(command, match.index + match[0].length, escape).map(literalPath);
     judgeWrite(match[1].toLowerCase() === 'copy' ? [args[1]] : [args[1], args[0]], `a .NET ${match[1]}`);
   }
-  if (STDIN_INTERPRETER.test(command)) {
+  if (readsScriptFromStdin(command, context.shell)) {
     for (const match of command.matchAll(SCRIPT_WRITE)) {
       const args = callArguments(command, match.index + match[0].length, '\\');
       if (/^open/i.test(match[1]) && !args.slice(1).some((arg) => WRITE_MODE.test(arg))) continue;

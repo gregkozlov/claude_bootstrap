@@ -10,7 +10,7 @@ The AI layer rots quietly: a file moves and a rule still names it, a count grows
 
 ## Mode
 
-The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`weekly`, `deep`, `efficiency`; an alias reads its mode's file): read that file before the first step, and only the others it names (`deep` runs the `weekly.md` steps it lists, `efficiency` uses `weekly.md` step 1 and `deep.md` D6).
+The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`weekly`, `deep`, `efficiency`; an alias reads its mode's file): read that file before the first step, and only the others it names (`deep` runs the `weekly.md` steps it lists, `efficiency` uses `weekly.md` step 1 and `deep.md` D6), plus `settled.md` (Standing rules).
 
 - **`weekly`** (also `weekly-maintenance`, and the default with no argument) - the whole layer, shallow: every mechanical check, the counts, rule loading, and a semantic `drift` pass limited to the rules the last 14 days of code touched. Run it every week or two.
 - **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, a code-to-layer sweep, a per-section rule-loading audit, cross-file consistency, the hooks and the memory.

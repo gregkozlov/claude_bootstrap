@@ -31,8 +31,11 @@ const LEDGER_SETTLE_MS = 250;
 // always does first stand in for looking at the app.
 const BROWSER_TOOL = 'mcp__claude-in-chrome__navigate';
 const APP_PATH = '<DEV_BASE_PATH>';
-// guard.mjs's dashes plus U+2010: one in a launch description would make every Edit anchored on its agents.md row fail.
-const DASH = new RegExp(`[${String.fromCharCode(0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xff0d)}]`, 'g');
+// guard.mjs's DASH set: one in a launch description would make every Edit anchored on its agents.md row fail.
+const DASH = new RegExp(
+  `[${String.fromCharCode(0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212, 0xff0d, 0x2e3a, 0x2e3b, 0xfe58, 0xfe31, 0xfe32, 0xfe63)}]`,
+  'g',
+);
 
 async function readStdin() {
   const chunks = [];
