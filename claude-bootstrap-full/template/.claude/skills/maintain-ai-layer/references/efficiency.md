@@ -14,7 +14,7 @@ The other modes ask whether the layer is **true**. This one asks whether it is *
 This mode, and only this mode, reads past the session boundary - read-only, for statistics:
 
 - every session folder's `agents.md`, `task-*.md` and `handoff.md`, under `.claude/sessions/` of this tree and of each other worktree `git worktree list` names;
-- the transcripts of the last 30 days: `*.jsonl` (and the subagent transcripts in the same-named folders) under `~/.claude/projects/<slug>/` of this tree and of each worktree (the slug as `deep.md` D6 derives it). **Never with Read** - only through a `node` script in the scratchpad that prints aggregates. No raw transcript text goes into the report or the task file.
+- the transcripts of the last 30 days: `*.jsonl` (and the subagent transcripts in the same-named folders) under `~/.claude/projects/<slug>/` of this tree and of each worktree (the slug as `deep.md` D5 derives it). **Never with Read** - only through a `node` script in the scratchpad that prints aggregates. No raw transcript text goes into the report or the task file.
 
 ## E1. Baseline
 

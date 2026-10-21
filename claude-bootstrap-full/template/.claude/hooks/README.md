@@ -1,12 +1,13 @@
 # Hooks
 
-Six dependency-free Claude Code hooks (Node 18+, no packages). Every script is tracked; one of the six registrations is not.
+Seven dependency-free Claude Code hooks (Node 18+, no packages). Every script is tracked; one of the seven registrations is not.
 
 | Hook | Event | Registered in | What it does |
 | --- | --- | --- | --- |
 | `guard.mjs` | `PreToolUse` on `Bash`, `PowerShell`, `Edit`, `Write`, `MultiEdit` | `.claude/settings.json` (tracked - repo policy, like the deny list beside it) | Refuses a tool call CLAUDE.md forbids outright, before it runs |
 | `record-activity.mjs` | `SubagentStop` + `PostToolUse` on `Edit` / `Write` / `MultiEdit`, the chrome `navigate` tool and `Agent` | `.claude/settings.json` (tracked) | Appends one file per event to a directory the Stop gate reads: which agents were launched and which finished, which files the model or a subagent edited, whether a browser check happened. An agent launch also appends a row `- HH:MM <type> launched - <description>` to `agents.md` in the session's own `.claude/sessions/` folder, when that session keeps one; the first launch, or the first edit of a file inside that session's folder, that finds no ledger creates it with the rows of the session's earlier launches |
 | `gate-registered.mjs` | `SessionStart` (startup, resume, clear) | `.claude/settings.json` (tracked) | Says so when this tree has no Stop gate registered, which is invisible otherwise |
+| `upkeep-nudge.mjs` | `SessionStart` (startup, clear) | `.claude/settings.json` (tracked) | Says so when the `maintain-ai-layer` pass is 14 days overdue, or never ran in this tree |
 | `compact-pointer.mjs` | `SessionStart` (startup, resume, clear, compact) + `PreCompact` + `PostCompact` | `.claude/settings.json` (tracked) | Names this session's artifact folder. `SessionStart` hands the model the session id prefix and the folder it has, or the name to open one under (`additionalContext`), and on `compact` where to resume from; `PreCompact` and `PostCompact` name the folder to the user (`systemMessage` - the harness rejects `hookSpecificOutput` on `PostCompact`), and on a manual `/compact` `PreCompact` says a handoff needs `/precompact` first. Both compaction events stay silent when the session has no folder |
 | `record-loads.mjs` | `InstructionsLoaded` (every load reason) | `.claude/settings.json` (tracked) | One file per `CLAUDE.md` or rule load, which `rules-reach.mjs --loads` replays against its model |
 | `verify-gate.mjs` | `SessionStart` (startup, resume, clear, compact) + `Stop` | `.claude/settings.local.json` (gitignored - opt-in, per tree) | Runs the probe check and `<CHECK_COMMAND>` at the end of a turn that changed watched files, blocks once on failure, and blocks once when this session edited `<SRC_DIR>/` with no review |
@@ -81,6 +82,10 @@ Registered in the tracked `settings.json`, so it runs for everyone. Only the per
 ## gate-registered.mjs - the gate that is not there
 
 Reads `.claude/settings.local.json` at session start and, when the file is missing or unreadable or no `Stop` hook in it names `verify-gate.mjs`, injects a line telling the model to run the check command by hand and to tell the owner the gate is off. It reports and never blocks. `settings.local.json` is gitignored and `git worktree add` does not carry it, so without this hook a second tree can run for weeks with no verification and nothing says so.
+
+## upkeep-nudge.mjs - the upkeep reminder
+
+Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer` after a `weekly` or `deep` run and by `setup`) and, when it is 14 days old or more, more than a day ahead, missing or unreadable, injects a line telling the model to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file): the pass runs in the main tree, and a second tree would be told so on every session. It reports and never blocks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`.
 
 ## record-loads.mjs - the load log
 

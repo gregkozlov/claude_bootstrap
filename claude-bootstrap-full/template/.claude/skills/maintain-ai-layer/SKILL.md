@@ -1,7 +1,7 @@
 ---
 name: maintain-ai-layer
-description: Periodic upkeep of the AI layer against the current code - weekly (default) or deep; efficiency audits its cost. Use on "/maintain-ai-layer", "maintain the AI layer", "audit the layer".
-argument-hint: '[weekly | deep | efficiency]'
+description: Periodic upkeep of the AI layer against the current code - weekly (default) or deep; rules rebuilds the rule set; efficiency audits its cost. Use on "/maintain-ai-layer", "maintain the AI layer", "audit the layer", "optimize the rules".
+argument-hint: '[weekly | deep | rules | efficiency]'
 ---
 
 # maintain-ai-layer
@@ -10,10 +10,11 @@ The AI layer rots quietly: a file moves and a rule still names it, a count grows
 
 ## Mode
 
-The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`weekly`, `deep`, `efficiency`; an alias reads its mode's file): read that file before the first step, and only the others it names (`deep` runs the `weekly.md` steps it lists, `efficiency` uses `weekly.md` step 1 and `deep.md` D6), plus `settled.md` (Standing rules).
+The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`weekly`, `deep`, `rules`, `efficiency`; an alias reads its mode's file): read that file before the first step, and only the others it names (`deep` runs the `weekly.md` steps it lists and the `rules.md` steps of its D2, `rules` runs `weekly.md` steps 1, 2 and 7, `efficiency` uses `weekly.md` step 1 and `deep.md` D5), plus `settled.md` (Standing rules).
 
 - **`weekly`** (also `weekly-maintenance`, and the default with no argument) - the whole layer, shallow: every mechanical check, the counts, rule loading, and a semantic `drift` pass limited to the rules the last 14 days of code touched. Run it every week or two.
-- **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, a code-to-layer sweep, a per-section rule-loading audit, cross-file consistency, the hooks and the memory.
+- **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, the `rules` reach, split and code-sweep steps, cross-file consistency, the hooks and the memory.
+- **`rules`** - the rule set alone, in depth: every rule checked against the code, `paths:` over- and under-reach, a rule whose sections serve different files split, new rules from a sweep of the code and its fix history, stale ones corrected or deleted. With no project rule - the state right after the bootstrap - it builds the set from the whole project. Run it once after `/setup`, then after a large code change, or when rule text per file climbs.
 - **`efficiency`** - where the pipeline is slow, does needless work or spends context and tokens with no result, measured, each finding with a default fix. The standing rules hold except where `efficiency.md` says otherwise, and it writes its own report. Run it every month or two, or after a large layer change.
 
 ## Standing rules (all modes)
@@ -29,16 +30,17 @@ The argument picks the mode, and the first line of the reply names it. Each mode
 - **The layer is team-shared.** A personal preference never goes into `CLAUDE.md` or a rule: it goes to `CLAUDE.local.md`, or into the report as a suggestion.
 - **Edits use Edit / Write only.** No commits, and plain hyphens. If the branch is not the default one, say so before the first edit - an AI-layer edit riding on a feature branch is the owner's call. If the auto-mode classifier refuses a `.claude/` edit, ask the owner for a grant and retry. Never route the edit through another tool.
 - **Record the run.** Open `task-ai-layer-<mode>.md` in this session's artifact folder. It holds the mode, the baseline numbers, every finding with its decision (applied, rejected with the reason, reported), and the numbers after. Every agent prompt names the files it may read and carries the list of decisions already taken in this run.
+- **Stamp the run.** A `weekly` or `deep` run in the main tree ends by writing today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`; `upkeep-nudge.mjs` reads it at session start and asks for the next pass after 14 days. `rules` and `efficiency` do not stamp.
 - **Every agent this skill launches runs on Sonnet; the main thread stays on the model the user picked.** Pass `model: "sonnet"` on each `Agent` call and no `effort`: the tool takes one only on an explicit request, and this skill makes none, so `drift` keeps its frontmatter `effort: high`, and the built-in `Explore`, which has no frontmatter, runs at its usual effort. A mechanical fact-check does not need the review model. The one exception is the review of an `efficiency` hook or script change, which follows `crosscheck`.
 
 ## Report
 
-The `weekly` and `deep` report is in the user's language and says:
+The `weekly`, `deep` and `rules` report is in the user's language and says:
 
 1. **Mode and what ran** - each agent type with its count (for example: `drift` x31 in 4 waves, `Explore` x4), and every step skipped, with the reason.
-2. **Numbers, before -> after** - a table with: `CLAUDE.md` bytes; the rules-reach median, top-decile and max; files over 30 KB; `layer-refs` unresolved; the `--check` and `--loads` results; `<CHECK_COMMAND>`.
-3. **Applied** - grouped by file, one line per change.
-4. **Reported, not applied** - hooks and settings, code findings, findings against settled decisions, workflow design proposals from D7, memory awaiting confirmation. Each item is answerable in one line.
+2. **Numbers, before -> after** - a table with: `CLAUDE.md` bytes; the rule count and total rule bytes; the rules-reach median, top-decile and max; files over 30 KB; `layer-refs` unresolved; the `--check` and `--loads` results; `<CHECK_COMMAND>`.
+3. **Applied** - grouped by file, one line per change; the rules added, split, merged and deleted come first, each with its reason.
+4. **Reported, not applied** - hooks and settings, code findings, findings against settled decisions, workflow design proposals from D6, memory awaiting confirmation. Each item is answerable in one line.
 5. **Not checked** - `unverifiable` claims, and anything skipped.
 
 The detail stays in the task file. The reply does not paste agent reports.

@@ -250,13 +250,14 @@ Manual steps left - in this order:
      Keep it under 48 000 bytes (wc -c CLAUDE.md).
   2. .claude/agents/twins.md: fill "Known twins"; .claude/agents/comments.md: the artefacts other agents own;
      .claude/skills/lifecycle/SKILL.md: the project's editor agents at step 4 (its [fill] lines);
-     .claude/skills/maintain-ai-layer/references/deep.md: the three source areas of step D2, and PREFIXES in
+     .claude/skills/maintain-ai-layer/references/rules.md: the three source areas of step R5, and PREFIXES in
      .claude/skills/maintain-ai-layer/layer-refs.mjs; .claude/skills/crosscheck/SKILL.md: replace the signal
      list with this project's risk classes; .claude/skills/verify-live/SKILL.md: every [fill] line
      (grep -n "\\[fill\\]" .claude/skills/verify-live/SKILL.md).
   3. .claude/agents/hunt.md: keep the shape of the attack angles, replace the classes the project does not have,
      and feed it every bug that surfaces after a review (examples/hunt-example.md shows a fed library).
   4. Self-test the guard:  node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs
+     and the upkeep reminder:  node .claude/hooks/tests/upkeep-nudge-test.mjs
      Add a test case per entry in GENERATED_PATHS (the two commented lines in guard-test.mjs).
   5. Exclude ${answers.SRC_DIR}/__hunt_probe*.ts from the build and lint configs, so a probe live while gate runs
      cannot fail "${answers.CHECK_COMMAND}" and get blamed on the diff. Then confirm the probe agents still
@@ -278,7 +279,8 @@ Manual steps left - in this order:
   9. The project's first path-scoped rule goes into .claude/rules/ beside the two the layer ships
      (rules-reach.md says how), with a "must" pair in .claude/scripts/rules-reach.fixture.json.
      Point its globs at the files that call the thing, then measure with node .claude/scripts/rules-reach.mjs:
-     a rule that does not load at the call site is a rule that does not exist.
+     a rule that does not load at the call site is a rule that does not exist. After /setup,
+     /maintain-ai-layer rules builds the whole set from the project.
  10. Start a new Claude Code session in the project - agents and skills are read at session start, and a
      running session is not guaranteed to pick up the hook registrations.`);
 

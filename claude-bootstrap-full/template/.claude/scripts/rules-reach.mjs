@@ -88,7 +88,9 @@ const matches = (rule, file) => rule.globs.some((glob) => path.posix.matchesGlob
 
 const rules = loadRules();
 const shapes = rules.flatMap((rule) => [...rule.problems, ...shapeProblems(rule)]);
-for (const problem of shapes) console.log(`SHAPE ${problem}`);
+// `--files` keeps stdout to paths alone: its callers count lines.
+const notice = process.argv[2] === '--files' ? console.error : console.log;
+for (const problem of shapes) notice(`SHAPE ${problem}`);
 
 if (process.argv[2] === '--check') {
   const { must = [], mustNot = [] } = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
@@ -276,6 +278,15 @@ if (process.argv[2] === '--check') {
     `rules-reach loads: ${records.length} records, ${checked} rule loads checked, ${findings.size} mismatches, ${stale} older than their rule, ${gitignored} gitignored triggers`
   );
   if (findings.size || malformed || checked === 0) process.exitCode = 1;
+} else if (process.argv[2] === '--files') {
+  const name = process.argv[3]?.replace(/\.md$/, '');
+  const rule = rules.find((r) => r.name === name);
+  if (rule) {
+    for (const file of listedFiles().filter((file) => matches(rule, file))) console.log(file);
+  } else {
+    notice(`FAIL  no rule named ${name ?? '(none given)'} in .claude/rules`);
+    process.exitCode = 1;
+  }
 } else {
   const files = listedFiles().filter((file) => file.startsWith(SRC) && /\.(tsx?|jsx?|mjs|py|rs|go|java|kt|cs)$/.test(file));
   if (files.length === 0) {

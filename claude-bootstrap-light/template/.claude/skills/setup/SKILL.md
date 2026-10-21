@@ -39,14 +39,14 @@ ls -a | grep -i "claude\|agents\.md\|cursorrules"      # untracked ones too
 
 **Which copy is which** is decided by the text, never by the name: the layer's own `CLAUDE.md` opens with the bootstrap note and carries `[fill]` markers and unfilled placeholder tokens in angle brackets; the project's own carries neither. Read the first 40 lines of each candidate before deciding.
 
-**How the layer arrived** changes only one thing - whether `.gitignore` was handled. `install.mjs` appends the block; a hand copy does not, so step 6's `git check-ignore` is the check that matters. Confirm the layer is complete either way: `CLAUDE.md`, `.claude/settings.json`, `.claude/agents/hunt.md`, `.claude/hooks/guard.mjs`, `.claude/hooks/tests/` (two files), `.claude/hooks/README.md`, `.claude/skills/{setup,debug,handoff,retro,maintain-ai-layer}/SKILL.md`, `.claude/skills/maintain-ai-layer/layer-refs.mjs`. Name anything missing in the report rather than writing it from memory.
+**How the layer arrived** changes only one thing - whether `.gitignore` was handled. `install.mjs` appends the block; a hand copy does not, so step 6's `git check-ignore` is the check that matters. Confirm the layer is complete either way: `CLAUDE.md`, `.claude/settings.json`, `.claude/agents/{hunt,drift}.md`, `.claude/hooks/{guard,upkeep-nudge}.mjs`, `.claude/hooks/tests/` (three files), `.claude/hooks/README.md`, `.claude/skills/{setup,debug,handoff,retro,maintain-ai-layer}/SKILL.md`, `.claude/skills/maintain-ai-layer/layer-refs.mjs`. Name anything missing in the report rather than writing it from memory.
 
 Then classify each hit before touching anything:
 
 - **The project's own instructions file, whatever it is called now** - the `CLAUDE.md` that predates the layer, or the `claude_old.md` / `CLAUDE.light.md` / `CLAUDE.bootstrap.md` the rename or the installer produced. Merge, do not concatenate: the old file's **project facts** (commands, architecture, conventions, prohibitions) move into the matching `[fill]` sections of the layer's copy, and the layer's process sections stay as they are. A statement in the old file that contradicts the layer (a different lifecycle, a different review policy, "commit when done") is **not merged silently**: list it in the report as a conflict with your recommendation, and let the user settle it. When the merge is done and the user has seen it, the merged text is what lives in `CLAUDE.md`. **The leftover file is deleted only if the layer created it** (`CLAUDE.light.md`, `CLAUDE.bootstrap.md`) - a file the user renamed by hand is theirs: say it can go, and leave it.
 - **`AGENTS.md`, `.cursorrules`, a `README` section of instructions** - another tool's rules for the same repo. Read them for project facts worth merging, but never delete or rewrite them; they belong to that tool.
 - **`.claude/settings.json` that already exists.** The installer kept it. Merge by hand: add the layer's `PreToolUse` guard registration to its `hooks`, and the `deny` / `allow` entries it lacks. Never drop an entry that was there, and never move a personal one into the tracked file - if it has a `settings.local.json`, leave it untouched.
-- **Existing agents, skills, commands or hooks.** Leave them. Report a name collision (their `hunt`, `debug`, `handoff`, `retro`, `maintain-ai-layer` or `setup` against the layer's) instead of resolving it yourself - the layer's file is the newcomer, so it is the one that gets renamed if the user wants both.
+- **Existing agents, skills, commands or hooks.** Leave them. Report a name collision (their `hunt`, `drift`, `debug`, `handoff`, `retro`, `maintain-ai-layer` or `setup` against the layer's) instead of resolving it yourself - the layer's file is the newcomer, so it is the one that gets renamed if the user wants both.
 - **A different Claude layer entirely** (a full bootstrap, a team layer with rules and its own lifecycle). Stop and say so: two lifecycles in one repo is a decision for the user, not a merge.
 
 ## 3. The values
@@ -71,7 +71,7 @@ Ask only what changes the outcome. Typical items: the check command when the pro
 
 ## 5. Fill
 
-**Seven files carry placeholders, and this skill is not one of them.** Fill exactly these, with the Edit tool, never from the shell:
+**Eight files carry placeholders, and this skill is not one of them.** Fill exactly these, with the Edit tool, never from the shell:
 
 1. `CLAUDE.md`
 2. `.claude/settings.json` - the check command in `allow`
@@ -80,9 +80,10 @@ Ask only what changes the outcome. Typical items: the check command when the pro
 5. `.claude/hooks/tests/guard-shell-test.mjs` - the source directory, in every case that names a path. Left unfilled, that suite fails the cases built from it, with nothing wrong with them.
 6. `.claude/skills/maintain-ai-layer/layer-refs.mjs` - the source directory in `PREFIXES`; add the project's other top-level folders a doc names by path.
 7. `.claude/hooks/tests/guard-test.mjs` - the source directory in the two write-fence cases. Left unfilled once `guard.mjs` is filled, `hunt Write of its probe (allow)` fails.
+8. `.claude/agents/drift.md` - project and source directory
 
 ```bash
-grep -rln "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills .claude/skills/maintain-ai-layer/layer-refs.mjs   # the seven, to confirm the list
+grep -rln "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills .claude/skills/maintain-ai-layer/layer-refs.mjs   # the eight, to confirm the list
 ```
 
 Then the `[fill]` sections of `CLAUDE.md` (`grep -n "\[fill\]" CLAUDE.md`), written from the repo, and finally **delete the bootstrap note at the top of `CLAUDE.md`** - it is an instruction to run this skill, and every later session would pay for it on every turn:
@@ -98,12 +99,13 @@ Finally, tune `.claude/agents/hunt.md`: delete the attack-angle classes the stac
 
 ```bash
 node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs   # every line "ok"
+node .claude/hooks/tests/upkeep-nudge-test.mjs                                             # every line "ok"
 grep -rn "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills .claude/skills/maintain-ai-layer/layer-refs.mjs   # no hits left
 node .claude/skills/maintain-ai-layer/layer-refs.mjs                                       # every hit explained
 git check-ignore CLAUDE.md .claude/settings.json .claude/agents/hunt.md .claude/hooks/guard.mjs .claude/skills/setup/SKILL.md   # must print nothing
 ```
 
-Then run the project's check command once, so its output is a fact and not an assumption.
+Then run the project's check command once, so its output is a fact and not an assumption. Last, write today's date (`YYYY-MM-DD`, the only line) into `.claude/.last-maintain` with `Write`: the layer was just checked against the repo, and `upkeep-nudge.mjs` counts the 14 days to the first `maintain-ai-layer` pass from it.
 
 A failing guard case is a bad generated-path regex nine times out of ten - fix the regex, not the test. Add one case per generated path (`guard-test.mjs` carries two commented lines showing the shape); without them nothing proves the list is live, since an empty list also passes. A failing check command is reported as the project's pre-existing state, never fixed here.
 
@@ -118,11 +120,11 @@ A failing guard case is a bad generated-path regex nine times out of ten - fix t
 !.claude/settings.json
 ```
 
-A project that is not a git repository at all: say so once, and skip the git checks here and in step 1 - the layer works, only the doc-drift grep at lifecycle step 5 loses its file list.
+A project that is not a git repository at all: say so once, and skip the git checks here and in step 1 - the layer works, only the docs check at lifecycle step 5 - the grep and `drift`'s `diff` mode - loses its file list.
 
 ## 7. Report
 
-In the user's language, short: what was read and what was assumed (marked), what was merged and what was left alone, the values filled, the test results, the open questions from step 4 that are still unanswered, and the last line - **start a new Claude Code session**: agents, skills and hook registrations are read at session start.
+In the user's language, short: what was read and what was assumed (marked), what was merged and what was left alone, the values filled, the test results, the open questions from step 4 that are still unanswered, that `/maintain-ai-layer rules` builds the project's first rule set when the owner wants one (dozens of agent launches, so it is their call), and the last line - **start a new Claude Code session**: agents, skills and hook registrations are read at session start.
 
 ## Boundaries
 

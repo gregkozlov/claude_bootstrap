@@ -41,4 +41,4 @@ Numbered list, each entry: **the problem** in one line, **the proposal** (what, 
 
 ## 4. After the answer
 
-Apply the chosen items through the normal lifecycle - the change's class decides the steps, and a `CLAUDE.md` or `.claude/` change still gets step 5's docs grep. A habit goes into memory as a `feedback` entry.
+Apply the chosen items through the normal lifecycle - the change's class decides the steps, and a `CLAUDE.md` or `.claude/` change still gets step 5's docs check. A habit goes into memory as a `feedback` entry.

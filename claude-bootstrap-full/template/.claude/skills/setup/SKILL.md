@@ -59,7 +59,7 @@ grep -rn "\[fill\]" CLAUDE.md .claude
 Edit tool only, never the shell. In order:
 
 1. **`CLAUDE.md`** - every `[fill]` section, then delete the bootstrap note at the top. Only facts an agent cannot derive from the code in a minute: the deliberate exceptions, the traps with a history, the "looks like a bug and is not" list, each standing decision marked settled and deliberate with its reason. Not an inventory of folders, not a rule the linter enforces. A count or a site list rots - write the grep that finds the sites instead. Keep it under 48 000 bytes (`wc -c CLAUDE.md`); if a section wants more, it goes into a path-scoped rule (step 6).
-2. **`.claude/agents/twins.md`** - the known-twins list; **`comments.md`** - the artefacts other agents own; **`.claude/skills/lifecycle/SKILL.md`** - the project's editor agents at step 4, each also registered in `.claude/hooks/verify-gate.mjs` (`UNREVIEWED_WRITERS`, `LIFECYCLE_AGENTS`, and its checker's own `CHECKS` entry deferred on it when it owns one - `.claude/hooks/README.md`), with the user's yes, since it is hook code; **`.claude/skills/maintain-ai-layer/references/deep.md`** - the three source areas of step D2, and in `layer-refs.mjs` the project's other top-level folders a doc names by path (`PREFIXES`).
+2. **`.claude/agents/twins.md`** - the known-twins list; **`comments.md`** - the artefacts other agents own; **`.claude/skills/lifecycle/SKILL.md`** - the project's editor agents at step 4, each also registered in `.claude/hooks/verify-gate.mjs` (`UNREVIEWED_WRITERS`, `LIFECYCLE_AGENTS`, and its checker's own `CHECKS` entry deferred on it when it owns one - `.claude/hooks/README.md`), with the user's yes, since it is hook code; **`.claude/skills/maintain-ai-layer/references/rules.md`** - the three source areas of step R5, and in `layer-refs.mjs` the project's other top-level folders a doc names by path (`PREFIXES`).
 3. **`.claude/skills/crosscheck/SKILL.md`** - the signal list. One entry per risk class **this** project has actually produced a runtime bug in; delete the classes it does not have. A signal list copied wholesale is a ladder that always reports tier 3.
 4. **`.claude/agents/hunt.md`** - keep the shape of the attack angles, replace the classes the stack cannot produce. `examples/hunt-example.md` in the bootstrap folder shows what a library fed by real bugs looks like.
 5. **`.claude/skills/verify-live/SKILL.md`** - every `[fill]`: the positive-control console line, the origin rule, the known console noise, the forced-state switch, the production-build measurement script. **No browser UI:** delete this skill, `.claude/scripts/dev-servers.mjs` and the "running app" block in `CLAUDE.md`, rewrite step 7 of `lifecycle` as the command that exercises the change, replace the `verify-live` sentence of `debug` phase 1 with the command that reproduces the bug, and in `crosscheck` section 2 read the live responses through that command instead of the browser. **A browser project still needs the marker endpoint itself** (`examples/tree-marker-plugin.ts` in the bootstrap folder is the Vite version, reporting the *listening* port, not the configured one): it is a source change, so this skill does not write it - name it in the report as the one step left to the owner.
@@ -68,6 +68,7 @@ Edit tool only, never the shell. In order:
 
 ```bash
 node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs   # every line "ok"
+node .claude/hooks/tests/upkeep-nudge-test.mjs                                             # every line "ok"
 node .claude/scripts/rules-reach.mjs --check                                               # "0 failed", no SHAPE line
 node .claude/skills/maintain-ai-layer/layer-refs.mjs                                       # every hit explained
 git check-ignore .claude/docs/decisions.md .claude/skills/setup/SKILL.md .claude/settings.json .claude/settings.local.example.json   # no output: all tracked
@@ -77,7 +78,7 @@ grep -rn "\[fill\]" CLAUDE.md .claude | grep -v "skills/setup/"                 
 <CHECK_COMMAND>                                                                            # it exists, and this is its output
 ```
 
-Add one test case per entry in `PROTECTED_PATHS` (`guard-test.mjs` carries two commented lines and `guard-shell-test.mjs` one, showing the shape). A failing guard case is a bad regex nine times out of ten - fix the regex, not the test. A failing check command is reported as the project's pre-existing state, never fixed here.
+Add one test case per entry in `PROTECTED_PATHS` (`guard-test.mjs` carries two commented lines and `guard-shell-test.mjs` one, showing the shape). A failing guard case is a bad regex nine times out of ten - fix the regex, not the test. A failing check command is reported as the project's pre-existing state, never fixed here. Then write today's date (`YYYY-MM-DD`, the only line) into `.claude/.last-maintain` with `Write`: the layer was just checked against the repo, and `upkeep-nudge.mjs` counts the 14 days to the first `maintain-ai-layer` pass from it.
 
 Then three config-level items:
 
@@ -87,7 +88,7 @@ Then three config-level items:
 
 ## 6. The first rule, and the gate
 
-Write the project's first path-scoped rule into `.claude/rules/` only if step 4 produced detail that `CLAUDE.md` should not carry (`rules-reach.md` says how a rule loads and what goes in one), with a `must` pair in `.claude/scripts/rules-reach.fixture.json` for the file that needs it. Point its globs at the files that call the thing, then measure with `node .claude/scripts/rules-reach.mjs`: a rule that does not load at the call site is a rule that does not exist, and a glob matching a third of the tree is paid on every read.
+Write the project's first path-scoped rule into `.claude/rules/` only if step 4 produced detail that `CLAUDE.md` should not carry (`rules-reach.md` says how a rule loads and what goes in one), with a `must` pair in `.claude/scripts/rules-reach.fixture.json` for the file that needs it. Point its globs at the files that call the thing, then measure with `node .claude/scripts/rules-reach.mjs`: a rule that does not load at the call site is a rule that does not exist, and a glob matching a third of the tree is paid on every read. The full set is not this step's job: `/maintain-ai-layer rules`, run in a later session, builds it from the whole project - name it in the report.
 
 Offer the optional Stop gate last: copy `.claude/settings.local.example.json` to `.claude/settings.local.json` (gitignored, per worktree). It is personal, so it is the user's call, not a default.
 

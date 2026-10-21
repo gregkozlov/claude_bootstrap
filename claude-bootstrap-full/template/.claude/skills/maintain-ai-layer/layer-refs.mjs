@@ -49,7 +49,7 @@ const scripts = fs.existsSync(manifest) ? new Set(Object.keys(JSON.parse(fs.read
 const onDisk = (ref) => SUFFIXES.some((suffix) => fs.existsSync(path.join(ROOT, ref.replace(/\/$/, '') + suffix)));
 // A gitignored path (a session folder, settings.local.json, a waiver) exists per machine or per run, not in the repo.
 // Under .claude/ only the known personal paths count: a deny-by-default `.claude/*` block ignores every typo there.
-const LOCAL_ONLY = /^\.claude\/(?:sessions|\.gate-waivers)(?:\/|$)|^\.claude\/(?:settings\.local\.json|handoff\.md)$|^CLAUDE\.local\.md$/;
+const LOCAL_ONLY = /^\.claude\/(?:sessions|\.gate-waivers)(?:\/|$)|^\.claude\/(?:settings\.local\.json|handoff\.md|\.last-maintain)$|^CLAUDE\.local\.md$/;
 const ignored = (ref) => {
   try {
     execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', '--no-index', ref], { stdio: 'ignore' });

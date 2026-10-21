@@ -1,6 +1,6 @@
 # hooks
 
-One hook: `guard.mjs`, registered as `PreToolUse` in `.claude/settings.json` (tracked - it is repo policy, like the deny list beside it). It reads one JSON payload on stdin and exits 2 with the reason on stderr to block the call, 0 to allow it. **A guard that cannot parse its input allows the call**: it is a backstop, never a security boundary. Node 18+, no dependencies.
+Two hooks, both registered in `.claude/settings.json` (tracked - repo policy, like the deny list beside them): `guard.mjs` below, and `upkeep-nudge.mjs` (end of this file). `guard.mjs`, registered as `PreToolUse`, reads one JSON payload on stdin and exits 2 with the reason on stderr to block the call, 0 to allow it. **A guard that cannot parse its input allows the call**: it is a backstop, never a security boundary. Node 18+, no dependencies.
 
 ## What it refuses
 
@@ -37,3 +37,7 @@ Run them after every change to `guard.mjs` or to `PROTECTED_PATHS`. A regex that
 - **The whole hook**: remove the `PreToolUse` block from `.claude/settings.json`. What remains is the deny list, which matches the **raw command string** only: `git -C <path> commit`, a quoted full path to the binary and a git call inside an interpreter one-liner all walk past it, and nothing at all is left against shell writes into the tree.
 
 A new rule goes in with a test case in the same change. The guard is regex over shell text: a rule with no test is a rule that works until the first quoted path.
+
+## upkeep-nudge.mjs - the upkeep reminder
+
+Registered as `SessionStart` (startup, clear). Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer` and by `setup`) and, when it is 14 days old or more, more than a day ahead, missing or unreadable, hands the model a line telling it to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file), since the pass runs in the main tree. It reports and never blocks, and costs tokens only on the day it speaks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`, every line `ok`.

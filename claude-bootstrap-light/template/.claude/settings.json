@@ -12,6 +12,19 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/upkeep-nudge.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking when the AI-layer upkeep last ran"
+          }
+        ]
+      }
     ]
   },
   "permissions": {
