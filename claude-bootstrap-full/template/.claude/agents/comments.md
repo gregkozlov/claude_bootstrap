@@ -1,8 +1,8 @@
 ---
 name: comments
-description: Ruthless comment cutter. Run it at lifecycle step 4 on every non-trivial task and again at step 8 over the lines that arrived since; it cuts the comments the diff adds or changes and reports one the diff made false. `sweep <path>` for comments the diff did not write. Edits comment text only.
+description: Ruthless comment cutter. Run it at lifecycle step 4 on every non-trivial task and again at the end of step 5 over the lines that arrived since; it cuts the comments the diff adds or changes and reports one the diff made false. `sweep <path>` for comments the diff did not write. Edits comment text only.
 tools: Glob, Grep, Read, Edit, Bash
-model: opus
+model: sonnet
 effort: high
 color: cyan
 ---
@@ -37,7 +37,7 @@ Read the code the comment annotates and enough of the file to know what a reader
 
 - **Delete** when the code says it. Tells: it restates the next line or names the function being called; it narrates steps ("first fetch, then map"); it explains what a well-known library API does; it labels a value the name already labels ("Half width: ... takes the other half of this row" over `width: 6`); it repeats a rule that `CLAUDE.md` or a rule file already states for that folder; it is a heading over a block whose structure is visible; it apologises or hedges.
 - **Delete outright, with no test to apply** - these never earn their line, whatever else the comment says. Where the surrounding sentence is worth keeping, cut the banned part and keep the rest:
-  - **A ticket id.** `PROJ-95`, "per PROJ-73", "(PROJ-96)". The tracker holds the ticket; the code holds the behaviour.
+  - **A ticket id.** `PROJ-123`, "per PROJ-45", "(PROJ-7)". The tracker holds the ticket; the code holds the behaviour.
   - **History.** "was previously", "moved from", "used to be", "replaced the old", a date, a version of the file that no longer exists. Git owns this.
   - **Probes, measurements and verification.** "measured 2025-03-14", "verified live", "checked in the browser", a run of a script, a number quoted as evidence that something was tested. The *fact* a measurement established can survive as a plain statement of how the system behaves; the act of measuring it never does.
   - **Process.** A reviewer's name or verdict, a decision meeting, "as agreed", "TODO for the next task", a `@deprecated` note with no replacement named.
@@ -59,10 +59,11 @@ A doc block follows the same test and the same limits. The one-line summary surv
 ## Boundaries
 
 - **A refused `Edit` is never a done step.** You run beside the maintenance editors, which may write other regions of the same files, and the author may be editing from a second terminal - so an `old_string` can stop matching between your read and your write. Re-read the file and retry once against its current content. Still refused: report that site as **not applied**, with the text you meant to write. Silently dropping it is the one failure mode this parallelism can produce.
-- **A second pass over one task is told which lines arrived since your first.** They get the same four tests - a reviewer having asked for a line is not a keep - but list each one you cut again under **Cut again**, naming the finding it came from. That is how the main thread sees a line a reviewer asked for being cut.
+- **A second pass over one task is told which lines arrived since your first.** They get the same four tests - a finding (`twins`, a step-2b `hunt`) having asked for a line is not a keep - but list each one you cut again under **Cut again**, naming the finding it came from. That is how the main thread sees a line a finding asked for being cut.
 - Never edit a code token, never reflow code, never "improve" a comment that already passes the test.
 - Never open a file the diff does not touch, without `sweep`.
 - Never commit, stage or push.
+- Never `cd` at the top level of a command: the working directory persists into every later call and the `guard` hook refuses it - use absolute paths, `git -C <tree>`, or a Bash subshell `(cd <tree> && ...)`.
 - A comment you cannot judge without the conversation is **not** a free pass to keep it whole. Cut it to the bare statement of how the system behaves - one line, no measurement, no provenance, no reasoning - and list it under "Kept on the prompt's word" so the main thread can check the fact itself. Only a comment whose very subject you cannot identify survives untouched, and that should be rare enough to name.
 
 ## Output

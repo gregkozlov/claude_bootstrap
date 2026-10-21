@@ -1,7 +1,9 @@
 ---
 name: integrate-worktree
-description: Integrate the second worktree's branch into main, or refresh an idle worktree, printing every mutating git command for the user. Use for "integrate the worktree", "merge the worktree", "bring main into the branch", a conflict question between the trees, or a stuck rebase.
+description: Integrate the second worktree's branch into main, or refresh an idle worktree; prints every mutating git command. Main-tree session only. Use on "integrate the worktree", "merge the worktree into main", "sync the trees", a question whether two branches will conflict, or a rebase stuck on conflicts.
 ---
+
+> Example from the example app, Stockroom (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. Depends on: a second git worktree, the guard hook that refuses mutating git, the project's check command, `i18n-merge-check.mjs` beside it, and `.claude/docs/worktree-flow.md` (`worktree-flow.md` here).
 
 # integrate-worktree
 
@@ -11,7 +13,7 @@ Two trees, worked in parallel, neither session aware of the other. This skill ex
 
 ## The human runbook
 
-`.claude/docs/worktree-flow.md` is the team's hand-run guide plus setup facts; this file is canonical for the mechanics - if they disagree, follow this file and say so.
+`.claude/docs/worktree-flow.md` is the hand-run guide plus setup facts; this file is canonical for the mechanics - if they disagree, follow this file and say so.
 
 ## Hard boundary
 
@@ -56,17 +58,19 @@ git rev-list --count <branch>..main    # what main has that the worktree lacks
 
 The printed command block is the one exception: it is for the user's own terminal and may open with a single `cd WT`.
 
+**Text after the command is the user's goal, not a mode.** The state picks the mode below; the goal shapes the report and the next steps. When the two disagree, say what the state requires first.
+
 Then pick the mode - **check in this order**, first match wins; resolve goes first because a half-finished rebase makes every other reading unreliable:
 
-| #   | Test                                                                               | Mode                                   |
-| --- | ---------------------------------------------------------------------------------- | -------------------------------------- |
-| 1   | `test -e "$(git -C WT rev-parse --git-path rebase-merge)"` (Bash), same for `rebase-apply` | **resolve** (`references/resolve.md`)  |
-| 2   | `git show-ref --verify --quiet refs/heads/WTB-prerebase` **and** `git merge-base --is-ancestor main WTB` both succeed | **verify** (`references/verify.md`; rebase done, merge pending or done) |
-| 3   | `main..WTB` == 0 **and** `WTB..main` == 0                                          | in sync - nothing to do, say so        |
-| 4   | `main..WTB` == 0 (so `main` is ahead)                                              | **refresh** (`references/refresh.md`)  |
-| 5   | otherwise, including `WTB` ahead with `main` unmoved                               | **preflight**                          |
+| #   | Test                                                                                                                             | Mode                                                                    |
+| --- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1   | `test -e "$(git -C WT rev-parse --git-path rebase-merge)"` (Bash), same for `rebase-apply` and, on the merge route, `MERGE_HEAD` | **resolve** (`references/resolve.md`)                                   |
+| 2   | `git show-ref --verify --quiet refs/heads/WTB-prerebase` **and** `git merge-base --is-ancestor main WTB` both succeed            | **verify** (`references/verify.md`; rebase done, merge pending or done) |
+| 3   | `main..WTB` == 0 **and** `WTB..main` == 0                                                                                        | in sync - nothing to do, say so                                         |
+| 4   | `main..WTB` == 0 (so `main` is ahead)                                                                                            | **refresh** (`references/refresh.md`)                                   |
+| 5   | otherwise, including `WTB` ahead with `main` unmoved                                                                             | **preflight**                                                           |
 
-Test 2 cannot tell this cycle's `WTB-prerebase` from one an earlier cycle left behind. A replay keeps each commit's author and author date, so compare those (not `git cherry`: a resolved conflict changes the patch): when `main..WTB` is non-empty and every line of `git log --format='%an %ad' $(git merge-base main WTB-prerebase)..WTB-prerebase` also appears in `git log --format='%an %ad' $(git merge-base main WTB-prerebase)..main`, the ref is from a landed cycle - report it and continue from test 3; deleting it is the owner's step. A line missing from `main` is this cycle's rebase, and a squash-landed cycle reads the same way, which only ends in asking the owner. An empty `main..WTB` is either verify after this cycle's merge or a ref a landed cycle left behind: `references/verify.md` then substitutes `main~<N>..main`, and a range-diff there that pairs nothing is the leftover - report it.
+Test 2 cannot tell this cycle's `WTB-prerebase` from one an earlier cycle left behind. A replay keeps each commit's author, author date and subject, so compare those (not `git cherry`: a resolved conflict changes the patch; the subject keeps two commits made in the same second apart): when `main..WTB` is non-empty and every line of `git log --format='%an %ad %s' $(git merge-base main WTB-prerebase)..WTB-prerebase` also appears in `git log --format='%an %ad %s' $(git merge-base main WTB-prerebase)..main` and none in `git log --format='%an %ad %s' main..WTB`, the ref is from a landed cycle - report it and continue from test 3; deleting it is the owner's step. A line found in `main..WTB`, or missing from `main`, is this cycle's rebase, and a squash-landed cycle reads the same way, which only ends in asking the owner. An empty `main..WTB` is either verify after this cycle's merge or a ref a landed cycle left behind: `references/verify.md` then substitutes the range the merge brought, and a range-diff there that pairs nothing is the leftover - report it.
 
 ---
 
@@ -128,7 +132,7 @@ Then link the repo's `node_modules` into that directory from the PowerShell tool
 New-Item -ItemType Junction -Path "<scratchpad>/merged/node_modules" -Target "MAIN/node_modules"
 ```
 
-and run the checks from Bash in a subshell:
+and run the checks from Bash in a subshell, with a `timeout` of 600000, awaited to its exit - the chain outlives the default 120 s:
 
 ```bash
 (cd "<scratchpad>/merged" && npm run type-check -- --force && npm run lint)
@@ -189,21 +193,21 @@ The dangerous case is not the conflict, it is the **clean** merge: both sides ed
 **In this repo that makes rebase the default route.** Integrations are run promptly and branches are not left to accumulate, so `main..WTB` stays small and the replay cost stays near zero. Recommend rebase unless the two numbers in front of you say otherwise:
 
 - **clean dry-run** -> rebase, for linear history, whatever the counts.
-- **conflicts, few commits on `WTB`** -> rebase still, and expect to resolve each conflict roughly once.
-- **conflicts and many commits on `WTB`** -> the branch ran longer than this flow intends; say that plainly rather than only routing around it, then recommend `git merge main` instead: a merge resolves each conflict exactly once, at the cost of a merge commit in the branch.
+- **conflicts, few commits on `WTB`** -> rebase still. The rebase stops on those paths at most once per commit of `git log --oneline main..WTB -- <conflicted paths>` (step 3's limit can add stops elsewhere), so that count, not `main..WTB`, is what "few" measures.
+- **conflicts and many commits on `WTB`** -> the branch ran longer than this flow intends; say that plainly rather than only routing around it, then recommend `git merge main` instead: a merge resolves each conflict exactly once, at the cost of a merge commit in the branch - and mode 3's range-diff skips that commit, so on this route the resolution is read with `git show --remerge-diff` (`references/verify.md`).
 
 Treat "few" as a judgement. Explain the route only when you steer away from rebase, in one line naming the counts.
 
-Emit exactly this, with `WT` and `WTB` substituted, and nothing extra:
+Emit exactly this, with `WT` and `WTB` substituted, and nothing extra - a line that does not fit the owner's terminal goes over as a script with its step list (`references/reporting.md`):
 
 ```bash
 cd WT
 git branch WTB-prerebase          # survives a botched --continue; git rebase --abort does not
 git rebase main && npm run check    # or: git merge main
-# on conflict: resolve (mode 2), git add + git rebase --continue, then re-run the checks
+# on conflict: resolve (mode 2), git add + git rebase --continue (merge route: git merge --continue), then re-run the checks
 ```
 
-The `&&` chain is deliberate: if the rebase stops on a conflict, the checks must not run against a half-rebased tree. If `WTB-prerebase` already exists (a tree kept from a previous cycle, or an aborted attempt), the first line becomes `git branch -f WTB-prerebase` - safe only before the rebase starts, while HEAD still equals the branch tip, and only while every commit of the ref is found on `main` by author and date (the comparison in the note after the mode table) or `git merge-base --is-ancestor WTB-prerebase HEAD` succeeds (an aborted attempt leaves the ref inside the branch); otherwise the ref still holds commits `main` lacks - stop and ask the owner.
+The `&&` chain is deliberate: if the rebase stops on a conflict, the checks must not run against a half-rebased tree. If `WTB-prerebase` already exists (a tree kept from a previous cycle, or an aborted attempt), the first line becomes `git branch -f WTB-prerebase` - safe only before the rebase starts, while HEAD still equals the branch tip, and only while every commit of the ref is found on `main` by author, date and subject (the comparison in the note after the mode table) or `git merge-base --is-ancestor WTB-prerebase HEAD` succeeds (an aborted attempt leaves the ref inside the branch). **When every commit of the ref is found in `main..WTB` instead**, this cycle already rebased once and `main` moved again: keep the ref as it is and drop the first line - it holds the original commits, so mode 3's range-diff from it covers both rebases. Otherwise the ref still holds commits `main` lacks - stop and ask the owner.
 
 Then, from the main tree, only after the checks are green:
 
@@ -224,7 +228,7 @@ A rebase is in progress and stopped on a conflict. **Read `references/resolve.md
 
 ## Mode 3: verify
 
-`WTB-prerebase` exists and `main` is an ancestor of `WTB`, so the rebase happened. **Read `references/verify.md` and follow it** - the two loss checks that must run in the window between the rebase and the merge, the gates, the merge, and when to tear the tree down.
+`WTB-prerebase` exists and `main` is an ancestor of `WTB`, so the rebase (or `git merge main`) happened. **Read `references/verify.md` and follow it** - the two loss checks that must run in the window between the rebase and the merge, the gates, the merge, and when to tear the tree down.
 
 ## Mode 4: refresh
 

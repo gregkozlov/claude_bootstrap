@@ -28,5 +28,7 @@ Then the command block, then stop.
 - the same fact restated in prose after it already appeared in the facts block;
 - commentary on how the parallel split went, or on the quality of either side's work.
 
+**A command block that does not fit one terminal line goes over as a script with its step list** - one command per step, each stopping the script on failure, the numbered steps plus the line that runs it - and the run line names the terminal: in PowerShell `& "<Git>/bin/bash.exe" "<script>"`, since a bare `bash` there is WSL.
+
 **One exception, kept to a line and placed last:** anything the user must act on that the facts block cannot carry - a follow-up they own, a check you did not run, a state that expires (a fast-forward that only holds while `main` is still). Honesty about an unrun check outranks the line budget.
 

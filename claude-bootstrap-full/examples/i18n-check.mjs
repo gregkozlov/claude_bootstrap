@@ -30,7 +30,7 @@ const walk = (dir, out = []) => {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) {
       if (name !== 'generated') walk(p, out);
-    } else if (/\.(ts|tsx)$/.test(name)) out.push(p);
+    } else if (/\.(ts|tsx)$/.test(name) && !/^__hunt_probe/.test(name)) out.push(p);
   }
   return out;
 };
@@ -127,7 +127,7 @@ if (placeholderWarnings.length > 0) {
   for (const line of placeholderWarnings) console.log(line);
 }
 
-// 4. Orphans (informational): en leaves nothing under src/ mentions as a plain string.
+// 5. Orphans (informational): en leaves nothing under src/ mentions as a plain string.
 if (WANT_ORPHANS) {
   const allText = sources.map(([, t]) => t).join('\n');
   const orphans = [];

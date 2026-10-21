@@ -25,7 +25,8 @@ const CHECK_COMMAND = '<CHECK_COMMAND>';
 // the rules-reach check alone.
 const WATCHED =
   /(?:\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|cs)|(?:^|\/)tsconfig[^/]*\.json|(?:^|\/)package\.json|^\.claude\/rules\/[^/]+\.md|^\.claude\/scripts\/rules-reach\.fixture\.json)$/;
-const PROBE = /^<SRC_DIR>\/__hunt_probe[^/]*\.ts$/;
+// The source directory escaped for a regex: a nested one (`apps/web/src`) carries slashes and dots.
+const PROBE = new RegExp(String.raw`^${'<SRC_DIR>'.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}\/__hunt_probe[^/]*\.ts$`);
 // A change to these alone runs only the rules-reach check, never the full check command.
 const RULE_DOCS = /^\.claude\/rules\/[^/]+\.md$|^\.claude\/scripts\/rules-reach\.fixture\.json$/;
 // Where a dev server for this tree answers, for the browser note below. From DEV_PORT_RANGE and
@@ -237,15 +238,26 @@ async function fileHash(root, relativePath) {
   }
 }
 
-// Content hashes, not mtimes, so an edit reverted back to the original state reads as unchanged.
-async function changedFileMap(root) {
-  const { stdout } = await execFile('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all'], {
-    cwd: root,
+// `GIT_OPTIONAL_LOCKS=0` keeps `git status` from taking `index.lock` to refresh the index, which would make the
+// owner's own git command in that instant fail; `core.ignorecase=false` makes a case-only rename show as a change.
+const git = (cwd, args) =>
+  execFile('git', ['-c', 'core.ignorecase=false', ...args], {
+    cwd,
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 32 * 1024 * 1024,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
   });
-  const relativePaths = [...new Set(parsePorcelainZ(stdout).filter((item) => WATCHED.test(item)))].sort();
+
+// Content hashes, not mtimes, so an edit reverted back to the original state reads as unchanged.
+async function changedFileMap(root) {
+  // Porcelain paths are relative to the repository root, which sits above a project kept in a subfolder.
+  const prefix = (await git(root, ['rev-parse', '--show-prefix'])).stdout.trim();
+  const { stdout } = await git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all', '--', '.']);
+  const inProject = parsePorcelainZ(stdout)
+    .filter((item) => item.startsWith(prefix))
+    .map((item) => item.slice(prefix.length));
+  const relativePaths = [...new Set(inProject.filter((item) => WATCHED.test(item)))].sort();
   const entries = await Promise.all(relativePaths.map(async (item) => [item, await fileHash(root, item)]));
   return Object.fromEntries(entries);
 }

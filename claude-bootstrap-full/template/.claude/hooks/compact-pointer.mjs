@@ -43,7 +43,7 @@ function sessionStartContext(prefix, folder, source) {
   return [
     named,
     'Read its task file before continuing - it carries the brief, the file list, the adjudicated findings and the open risks, none of which the summary keeps.',
-    "Write only into this folder. Another session's folder is read only when the owner named it to continue from in their first message.",
+    "Write only into this folder. Another session's folder is read only when the owner named it to continue from in their first message, or by `/maintain-ai-layer efficiency`, for statistics.",
   ].join(' ');
 }
 

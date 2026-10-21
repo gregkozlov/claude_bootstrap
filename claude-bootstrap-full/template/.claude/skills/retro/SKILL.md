@@ -1,6 +1,7 @@
 ---
 name: retro
-description: Retrospective of the task this session just ran - what worked, what went badly, and a numbered list of concrete improvements, each with a recommended default. Use on "/retro", "retrospective", "reflect on the pass", "what went well and what went badly", in any language, once a task has closed. Never on your own initiative.
+description: Retrospective of the task this session just ran, ending in numbered improvements with recommended defaults.
+disable-model-invocation: true
 ---
 
 # retro

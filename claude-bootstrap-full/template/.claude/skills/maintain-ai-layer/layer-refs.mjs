@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mechanical reference check over the AI layer: every backticked repo path, `npm run <script>`, "the `x` skill"
 // and "`x` agent / subagent" in the layer's Markdown must still resolve. A path counts as resolved when it
-// exists or is gitignored. Read-only; always exits 0.
+// exists, is a known personal path, or is gitignored outside .claude/. Read-only; always exits 0.
 //
 //   node .claude/skills/maintain-ai-layer/layer-refs.mjs [file-or-dir ...]
 //
@@ -27,7 +27,7 @@ const targets = () => {
       .split('\n')
       .filter((f) => f && !f.includes('node_modules/'));
     const local = fs.existsSync(path.join(ROOT, 'CLAUDE.local.md')) ? ['CLAUDE.local.md'] : [];
-    return [...new Set([...tracked, ...local])].map((f) => path.join(ROOT, f));
+    return [...new Set([...tracked, ...local])].map((f) => path.join(ROOT, f)).filter((f) => fs.existsSync(f));
   }
   return args.flatMap((arg) => {
     const full = path.resolve(ROOT, arg);
@@ -48,6 +48,8 @@ const scripts = fs.existsSync(manifest) ? new Set(Object.keys(JSON.parse(fs.read
 
 const onDisk = (ref) => SUFFIXES.some((suffix) => fs.existsSync(path.join(ROOT, ref.replace(/\/$/, '') + suffix)));
 // A gitignored path (a session folder, settings.local.json, a waiver) exists per machine or per run, not in the repo.
+// Under .claude/ only the known personal paths count: a deny-by-default `.claude/*` block ignores every typo there.
+const LOCAL_ONLY = /^\.claude\/(?:sessions|\.gate-waivers)(?:\/|$)|^\.claude\/(?:settings\.local\.json|handoff\.md)$|^CLAUDE\.local\.md$/;
 const ignored = (ref) => {
   try {
     execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', '--no-index', ref], { stdio: 'ignore' });
@@ -56,7 +58,7 @@ const ignored = (ref) => {
     return false;
   }
 };
-const resolves = (ref) => onDisk(ref) || ignored(ref);
+const resolves = (ref) => onDisk(ref) || LOCAL_ONLY.test(ref) || (!ref.startsWith('.claude/') && ignored(ref));
 
 const cleanPath = (span) => {
   const ref = span

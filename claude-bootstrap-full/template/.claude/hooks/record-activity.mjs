@@ -151,7 +151,14 @@ function buildRecord(payload) {
     }
     if (payload.tool_name === BROWSER_TOOL) {
       const url = typeof payload.tool_input?.url === 'string' ? payload.tool_input.url : '';
-      if (!url.includes(APP_PATH) || url.includes('__tree')) return undefined;
+      // A local dev server only: with the base path `/`, any site would otherwise count as a look at the app.
+      let page;
+      try {
+        page = new URL(url);
+      } catch {
+        return undefined;
+      }
+      if (!/^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(page.hostname) || !page.pathname.startsWith(APP_PATH) || url.includes('__tree')) return undefined;
       return { kind: 'browser', url, ...base };
     }
     const file = relativePath(repoRoot(payload), payload.tool_input?.file_path);

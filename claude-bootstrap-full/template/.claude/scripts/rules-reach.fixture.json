@@ -1,7 +1,8 @@
 {
   "must": [
     { "file": ".claude/hooks/record-activity.mjs", "rule": "session-artifacts", "needle": "The folder name is the only link" },
-    { "file": ".claude/scripts/rules-reach.mjs", "rule": "rules-reach", "needle": "every `must` pair names a file, a rule and a needle" }
+    { "file": ".claude/scripts/rules-reach.mjs", "rule": "rules-reach", "needle": "every `must` pair names a file, a rule and a needle" },
+    { "file": ".claude/rules/session-artifacts.md", "rule": "rules-reach", "needle": "Reach is paid in bytes, under-reach in defects." }
   ],
   "mustNot": [
     { "file": ".claude/hooks/guard.mjs", "rule": "session-artifacts" },

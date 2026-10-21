@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Write .claude/handoff.md so the work survives a /compact, a new session or a usage window running out. Only when the user says "/handoff", "handoff", "before compact", "write a handoff", or announces a /compact - never on your own initiative.
+description: Write .claude/handoff.md before a /compact, a session switch or a usage window running out.
 ---
 
 # handoff
@@ -38,15 +38,23 @@ Write tool, `.claude/handoff.md`, English, identifiers and paths as-is. Fixed se
 Handoff for continuing after /compact or in a fresh session. Temporary, never committed.
 Tree <path>, branch <branch>, HEAD <sha>.
 
-## Task                         <- quoted verbatim; later widenings and narrowings
-## Tree state                   <- git facts; staged vs unstaged vs untracked; files outside git
-## Done                         <- numbered; measured numbers as before / after pairs
-## Owner decisions              <- verbatim quotes; settled, never re-ask
+## Task <- quoted verbatim; later widenings and narrowings
+
+## Tree state <- git facts; staged vs unstaged vs untracked; files outside git
+
+## Done <- numbered; measured numbers as before / after pairs
+
+## Owner decisions <- verbatim quotes; settled, never re-ask
+
 ## My decisions and assumptions <- each with its reason
-## Verified / not verified      <- two lists; a check not run is a check not run
+
+## Verified / not verified <- two lists; a check not run is a check not run
+
 ## Open questions for the owner <- numbered, each answerable in one line
-## Next steps                   <- ordered; step 1 startable from this file alone
-## Tools and artifacts          <- scratchpad scripts, subagent reports, extracted inputs
+
+## Next steps <- ordered; step 1 startable from this file alone
+
+## Tools and artifacts <- scratchpad scripts, subagent reports, extracted inputs
 ```
 
 Rules for the content:

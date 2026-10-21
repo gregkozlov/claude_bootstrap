@@ -80,13 +80,13 @@ Land on one:
 
 **A STALE or WRONG verdict is a result, not a failure.** Not everything in this backlog needs fixing. Say so plainly and recommend `close`.
 
-**A CONFIRMED or PARTLY runtime defect is reproduced before the plan**: load the `debug` skill and run its reproduction phase on the surface the ticket names. Where that cannot happen - no server listening for this tree, data out of reach - the steps are still written from the code and **How to reproduce** is marked `not observed live`.
+**A CONFIRMED or PARTLY runtime defect is reproduced before the plan**, and before step 3's question: load the `debug` skill and run its reproduction phase on the surface the ticket names. A claim about what the browser shows - a console warning, where focus lands - is a runtime defect too. When `node .claude/scripts/dev-servers.mjs` lists no server for this tree, stop after the verdict and ask the owner to start one, as `debug` phase 1 says, and run the reproduction once they have. Only where the data is out of reach, or an intermittent symptom stayed quiet (`debug` phase 1), are the steps written from the code and **How to reproduce** marked `not observed live`. A listening server is never a reason to defer the reproduction to the implementation.
 
 ### 3. Explain the bug, then ask the blocking questions
 
 Ask **before** presenting the plan, so the user reads one decided plan - but **never open with the question**: a choice between contracts is unanswerable until the defect is pictured, and "explain what the bug actually is" coming back is this step failing.
 
-So write **What is broken** and **How to reproduce** first, in the user's language, exactly as step 4 defines them: the mechanism anchored to `file:line`, then numbered steps through the real UI ending in observed vs expected. Only then make **one** `AskUserQuestion` call, with each option phrased as what it does to the product rather than as a code edit.
+So write **What is broken** and **How to reproduce** first, in the user's language, exactly as step 4 defines them, and only then make **one** `AskUserQuestion` call, with each option phrased as what the user will see on screen rather than as a code edit. The two sections are read by someone deciding, not reviewing code: lead with the screen, keep the code to one line under **Cause**, and cut every sentence that does not help them picture the bug.
 
 - **Qualifies:** the answer changes what gets built, and the code cannot settle it. Every item ending **"Decide before touching it"** is one by construction - typically a helper whose name and behaviour disagree, where "fix the behaviour" and "rename to match it" produce different diffs. Scope is the other recurring one: fix the cited site, or sweep all its siblings.
 - **Does not qualify:** anything a read would answer - go read it. And anything shaped like permission to proceed ("shall I start?", "is this right?"); the three ways forward at the end of the report already are that question.
@@ -100,8 +100,15 @@ No source edits in this mode. Answer in the user's language, headings included. 
 
 **`<id> - <short title>`** `(effort tag)` - **VERDICT**
 
-- **What is broken** - the mechanism in 2-4 sentences, anchored to `file:line`. Not a paraphrase of the ticket: what you established by reading the code.
-- **How to reproduce** - numbered steps through the real UI: route, filters, click sequence, then observed vs expected - observed in the browser, or marked `not observed live` (see the verdict). Name the preconditions (a supplier with no purchase orders, a period with no data, a second user account). If it is not reproducible from the UI - build, tooling, dead code, a config file - say so and give the command, grep or bundle measurement that demonstrates it instead - for a bundle ticket, the `bundle-report diff` table of the baseline build against the `--transform` build.
+- **What is broken** - bullets, no paragraphs:
+  - **Bug** - one or two sentences in product terms: which screen, what the user does, what goes wrong. No code, no library internals.
+  - **Cause** - one line anchored to `file:line`: the mechanism you established by reading the code, not a paraphrase of the ticket.
+  - **Harm** - one line: what is wrong on screen or in the data, and what is not (e.g. "the backend value is right, only the display lies").
+- **How to reproduce** - numbered steps, one action each:
+  1. the exact URL, with a real id when the data matters, and the filters and period to set;
+  2. each click or keystroke, naming the control by its visible label;
+  3. **Observed** vs **Expected**, one line each, then `seen live` or `not observed live` (see the verdict).
+  Preconditions (a supplier with no purchase orders, a period with no data, a second user account) go in step 1, and a quirk that changes what the user sees (a German locale, a forced state) gets its own step. If it is not reproducible from the UI - build, tooling, dead code, a config file - say so and give the command, grep or bundle measurement that demonstrates it instead - for a bundle ticket, the `bundle-report diff` table of the baseline build against the `--transform` build.
 - **Plan** - see below.
 - **Notes** - what the ticket missed or got wrong, a simpler alternative, an assumption the plan rests on. Drop this section when there is nothing real to add; padding it wastes the user's time.
 - **Risk** - what else the change touches, and the effort you actually expect versus the tag on the ticket.

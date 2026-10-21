@@ -91,7 +91,8 @@ const shapes = rules.flatMap((rule) => [...rule.problems, ...shapeProblems(rule)
 for (const problem of shapes) console.log(`SHAPE ${problem}`);
 
 if (process.argv[2] === '--check') {
-  const fixture = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+  const { must = [], mustNot = [] } = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+  const fixture = { must, mustNot };
   const byName = new Map(rules.map((rule) => [rule.name, rule]));
   const known = new Set(listedFiles());
   let failures = 0;
@@ -100,12 +101,23 @@ if (process.argv[2] === '--check') {
     failures++;
     console.log(`FAIL  ${message}`);
   };
+  // `--all`: a worktree on an older branch still sees a file another branch added.
+  const everExisted = (file) => {
+    try {
+      const args = ['--literal-pathspecs', '-C', ROOT, 'log', '--all', '-1', '--format=%H', '--', file];
+      return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      return false;
+    }
+  };
   // Windows resolves `src\x.ts`, `./src/x.ts` and a wrong case, and no glob matches them.
   const usable = (file) => {
     const onDisk = fs.existsSync(path.join(ROOT, file));
     if (onDisk && known.has(file)) return true;
     if (onDisk) {
       fail(`${file} is not in git ls-files form (forward slashes, exact case) or is gitignored`);
+    } else if (!everExisted(file)) {
+      fail(`${file} is in no commit - a typo in rules-reach.fixture.json, or a path git cannot read`);
     } else {
       warnings++;
       console.log(`WARN  ${file} no longer exists - update rules-reach.fixture.json`);

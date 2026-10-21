@@ -7,7 +7,7 @@
 //
 // No dependencies; Node 18+.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,10 +40,15 @@ function walk(dir, out = []) {
 }
 
 const args = process.argv.slice(2);
+const unknown = args.find((arg) => arg.startsWith('--') && arg !== '--dry-run');
+if (unknown) usage(`unknown option ${unknown}`);
 const dryRun = args.includes('--dry-run');
-const target = resolve(args.find((arg) => !arg.startsWith('--')) ?? usage());
+const targets = args.filter((arg) => !arg.startsWith('--'));
+if (targets.length > 1) usage('one target only');
+const target = resolve(targets[0] ?? usage());
 if (!existsSync(target) || !statSync(target).isDirectory()) usage(`${target} is not a directory`);
-if (target === resolve(HERE)) usage('the target is the bootstrap folder itself');
+const fromHere = relative(HERE, target);
+if (!fromHere.startsWith('..') && !isAbsolute(fromHere)) usage('the target is the bootstrap folder itself, or inside it');
 if (!existsSync(TEMPLATE)) usage(`no template/ beside ${fileURLToPath(import.meta.url)}`);
 
 const written = [];
@@ -74,14 +79,14 @@ for (const source of walk(TEMPLATE)) {
 const gitignore = join(target, '.gitignore');
 const hadGitignore = existsSync(gitignore);
 const currentIgnore = hadGitignore ? readFileSync(gitignore, 'utf8') : '';
-let ignoreNote = 'unchanged (it already carries a .claude negation)';
-if (!currentIgnore.includes('.claude')) {
-  if (!dryRun) appendFileSync(gitignore, `${currentIgnore && !currentIgnore.endsWith('\n') ? '\n' : ''}${GITIGNORE_BLOCK.join('\n')}\n`, 'utf8');
-  ignoreNote = hadGitignore ? 'appended the .claude block' : 'created with the .claude block';
-} else if (!/^\s*!\s*\.claude\//m.test(currentIgnore)) {
+let ignoreNote = 'unchanged (it already carries a .claude/* block - /setup proves its negations)';
+if (/^\s*\/?\.claude\/?\s*$/m.test(currentIgnore)) {
   // A rule like `.claude/` keeps git from descending into the folder at all, so no negation after it can
   // rescue the layer's files: the rule has to be replaced, and only the owner can decide that.
-  ignoreNote = 'left alone, AND IT HIDES THE LAYER: a .claude rule with no negation means git never descends into the folder, so nothing installed above can be committed or shared. Replace that rule with the block in the light layer README, then re-check with: git check-ignore -v .claude/settings.json';
+  ignoreNote = `left alone, AND IT HIDES THE LAYER: a bare .claude rule means git never descends into the folder, so nothing installed above can be committed or shared. Replace that rule with:\n  ${GITIGNORE_BLOCK.slice(2).join('\n  ')}\nthen re-check with: git check-ignore .claude/settings.json .claude/agents/hunt.md   (must print nothing)`;
+} else if (!/^\s*\/?\.claude\/\*\s*$/m.test(currentIgnore)) {
+  if (!dryRun) appendFileSync(gitignore, `${currentIgnore && !currentIgnore.endsWith('\n') ? '\n' : ''}${GITIGNORE_BLOCK.join('\n')}\n`, 'utf8');
+  ignoreNote = `${dryRun ? 'would be ' : ''}${hadGitignore ? 'appended the .claude block' : 'created with the .claude block'}`;
 }
 
 console.log(`\n${dryRun ? 'would write' : 'wrote'} ${written.length} file(s) into ${target}:`);

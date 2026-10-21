@@ -1,6 +1,6 @@
 ---
 name: verify-live
-description: The browser check for a finished change against the right server and browser - lifecycle step 7, and on "/verify-live", "check it live", "look at it in the app", "check it in the browser". Never starts a server.
+description: Load it before any look at the running app in the browser - the lifecycle step 7 check, a bug reproduction, a live probe - and on "/verify-live", "check it in the browser", "look at it in the app", "check it live".
 ---
 
 # verify-live
@@ -33,7 +33,7 @@ The tree is the one the session's cwd resolves to. A worktree is its own tree wi
 node .claude/scripts/dev-servers.mjs
 ```
 
-It lists every listener in the project's port range with the tree and branch it runs from, marks the row that is this tree and prints the URL. **Use only the row marked THIS TREE.** No such row: nothing serves this tree - stop, and the turn goes on as lifecycle step 7 (the `lifecycle` skill) says. A listener the script cannot attribute is somebody else's process, not a candidate.
+It lists every listener in the project's port range with the tree and branch it runs from, marks the row that is this tree and prints the URL. **Use only the row marked THIS TREE.** No such row: nothing serves this tree - stop and ask the owner to start one; what runs meanwhile is the caller's rule (lifecycle step 7 for a change check, `debug` phase 1 for a reproduction). A listener the script cannot attribute is somebody else's process, not a candidate.
 
 Then prove the marker from the shell, before touching the browser:
 
@@ -41,7 +41,7 @@ Then prove the marker from the shell, before touching the browser:
 curl -s -m 5 http://localhost:<port><DEV_BASE_PATH>__tree
 ```
 
-It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the README asked the project to add - `examples/tree-marker-plugin.ts` is the Vite version). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` instead - ask the user to restart it.
+It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the bootstrap's README asked the project to add - `examples/tree-marker-plugin.ts` in the bootstrap folder is the Vite version). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` instead - ask the user to restart it.
 
 ## 3. Which browser - proved, not assumed
 
@@ -59,8 +59,11 @@ On every surface the diff reaches - a shared component means every call site tha
 
 - Navigate to the surface; accessibility snapshot of the changed element, not the whole page; screenshot.
 - `read_console_messages` with a pattern for the surface. [fill] Name the known console noise here so it is not reported as new.
-- `read_network_requests`: does the request leave with the right params, does the response carry the shape and scale the UI assumes.
+- `read_network_requests`: does the request leave with the right params - and, on a mutation, the full body the endpoint replaces the record with - and does the response carry the shape and scale the UI assumes.
 - Loading / error / empty branches where the change has them ([fill] the project's forced-state switch, if it has one); every locale where strings or formatting moved; the largest font size where widths are fixed; open and close every overlay the change touches and check focus lands back on the trigger with a clean console.
+- A `screenshot` can time out after an in-app Back / Forward, so read overlay state with `javascript_tool` over `[role=dialog]` instead.
+- A script-driven `el.focus()` does not set the component library's focused-state class while the browser window lacks OS focus, which reads exactly like a broken focus style: check `document.hasFocus()` first, or click through the `computer` tool.
+- Scope a DOM query to the surface under test. A class the component library reuses app-wide matches the first control on the page, not necessarily the surface's; read back something identifying, such as the label text, to confirm what was measured.
 
 **A change only a production build can show** - chunking, what is lazy or static, bundle size - is not verified here: a dev server that serves modules unbundled cannot show it. Its evidence is a comparison of two production builds ([fill] the project's measurement script, if it has one - `examples/bundle-report.mjs` is the Vite version), and the browser pass shrinks to what can still differ: each surface whose imports moved still renders with a clean console, and a page that should no longer load a module does not request it (the `performance` reading above). Say in the report which half came from which.
 

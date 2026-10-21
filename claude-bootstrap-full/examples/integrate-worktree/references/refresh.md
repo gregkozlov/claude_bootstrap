@@ -1,3 +1,5 @@
+> Example from the example app, Stockroom (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. Reference for integrate-worktree.
+
 # Mode 4: refresh
 
 `WTB` has no commits of its own and `main` has moved. Nothing to integrate - the tree is just behind, which is where an idle second tree sits after every completed cycle. Starting a task on a stale base is how an avoidable rebase gets created later.

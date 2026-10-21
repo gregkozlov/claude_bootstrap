@@ -1,11 +1,11 @@
 ---
 name: precompact
-description: Write this session's handoff.md into its artifact folder. Only when the user says "/precompact", "handoff", "before compact", "write a handoff", or announces a /compact - never on your own initiative.
+description: Write this session's handoff.md into its artifact folder before a /compact or a session switch.
 ---
 
 # precompact
 
-A `/compact` keeps a summary of this chat; a new session keeps nothing. This skill writes the one file that makes either continuation cheap: `handoff.md` in **this session's own artifact folder**, **in English** - its reader is the model, not the user - with every fact the next session would otherwise have to rediscover or ask for. The user's own words are quoted verbatim in whatever language they were said, a long dash written as a hyphen (the guard refuses the dash in any project file).
+A `/compact` keeps a summary of this chat; a new session keeps nothing. This skill writes the one file that makes either continuation cheap: `handoff.md` in **this session's own artifact folder**, **in the project's own language** (`CLAUDE.md`, Working Principles) - its reader is the model, not the user - with every fact the next session would otherwise have to rediscover or ask for. The user's own words are quoted verbatim in whatever language they were said, a long dash written as a hyphen (the guard refuses the dash in any project file).
 
 **The file is the deliverable.** It is temporary and personal (`.claude/sessions/` is gitignored), read in full by whoever picks the work up, and the owner prunes the folders by hand. **Nothing picks it up automatically** - no hook, no memory line: several sessions can run in the same tree at once, and a handoff belongs to one task, not to whoever starts next. The user names the folder in the session that should read it, which is why section 4 below ends by printing that sentence.
 
@@ -45,17 +45,27 @@ Fixed section order; keep every section even when it says "none":
 Handoff for continuing after /compact or in a fresh session. Temporary, never committed - delete when the work is closed.
 Tree <path>, branch <branch>, HEAD <sha>. Task file beside this one: <name or "none">.
 
-## Task                        <- as the user asked it, quoted verbatim; later widenings / narrowings
-## Tree state                  <- git facts; staged vs unstaged vs untracked; files outside git; what must not be committed
-## Done                        <- numbered; measured numbers in a table when there are before / after pairs
-## Owner decisions             <- verbatim quotes; settled, never re-ask
+## Task <- as the user asked it, quoted verbatim; later widenings / narrowings
+
+## Tree state <- git facts; staged vs unstaged vs untracked; files outside git; what must not be committed
+
+## Done <- numbered; measured numbers in a table when there are before / after pairs
+
+## Owner decisions <- verbatim quotes; settled, never re-ask
+
 ## My decisions and assumptions <- each with its reason
-## Verified / not verified     <- two lists; a check not run is a check not run
+
+## Verified / not verified <- two lists; a check not run is a check not run
+
 ## Open questions for the owner <- numbered, each answerable in one line
-## Next steps                  <- ordered; step 1 startable immediately from this file alone
-## Loose ends                  <- known small leftovers nobody decided on
-## Tools and artifacts         <- scratchpad scripts (path + one line each), memory files touched, subagent outputs
-## Context for the next step   <- pre-digested inputs the next step needs (an extracted report, a measured table), so it is not re-derived
+
+## Next steps <- ordered; step 1 startable immediately from this file alone
+
+## Loose ends <- known small leftovers nobody decided on
+
+## Tools and artifacts <- scratchpad scripts (path + one line each), memory files touched, subagent outputs
+
+## Context for the next step <- pre-digested inputs the next step needs (an extracted report, a measured table), so it is not re-derived
 ```
 
 Rules for the content:

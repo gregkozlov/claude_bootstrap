@@ -8,7 +8,7 @@ Two project-agnostic working layers for [Claude Code](https://docs.claude.com/en
 | Lifecycle | ten steps; steps 3-10 in a `lifecycle` skill | six steps, all in `CLAUDE.md` |
 | Review | a ladder by risk signals: `gate`, `hunt`, `integration`, plus `twins`, `comments`, `drift` | one reviewer, `hunt`, on the plan and on the diff |
 | Hooks | `guard`, an opt-in Stop gate, an activity recorder, a rule-load log, session pointers | `guard` only |
-| Extras | session artifact folders, rule-reach measurement, a browser-check ritual, periodic upkeep of the layer | none - each dropped part is named in its README |
+| Extras | session artifact folders, rule-reach measurement, a browser-check ritual, periodic upkeep of the layer | a main-thread upkeep pass of the layer (`maintain-ai-layer`); each dropped part is named in its README |
 | `CLAUDE.md` budget | 48 KB | 20 KB |
 | Install | `node claude-bootstrap-full/apply.mjs <project> --config <answers.json>` | `node claude-bootstrap-light/install.mjs <project>` |
 

@@ -9,8 +9,8 @@ import { gzipSync } from 'node:zlib';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const INVARIANTS = [
-  { chunk: 'components', marker: 'MuiDataGrid', home: 'DataTable', source: 'CLAUDE.md, Imports' },
-  { chunk: 'components', marker: 'maplibregl', home: 'WarehouseMap', source: 'CLAUDE.md, Imports' },
+  { chunk: 'components', owner: 'src/components/', marker: 'MuiDataGrid', home: 'DataTable', source: 'CLAUDE.md, Imports' },
+  { chunk: 'components', owner: 'src/components/', marker: 'maplibregl', home: 'WarehouseMap', source: 'CLAUDE.md, Imports' },
 ];
 
 // Vite empties outDir, so an existing non-empty directory is accepted only when an earlier run left this file in it.
@@ -146,14 +146,39 @@ const attribution = (b, chunk) => {
     .join(', ');
 };
 
+// Repo-relative sources outside node_modules; null when the chunk has no sourcemap.
+const repoSources = (b, file) => {
+  const mapFile = path.join(b.assets, `${file}.map`);
+  if (!fs.existsSync(mapFile)) return null;
+  let map;
+  try {
+    map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
+  } catch {
+    fail(`unreadable sourcemap ${mapFile}`);
+  }
+  const dir = path.resolve(path.dirname(mapFile), map.sourceRoot ?? '');
+  // The native realpath, as Vite resolves module ids: through a subst drive the JS one would leave every source outside ROOT.
+  const root = fs.realpathSync.native(ROOT);
+  return (map.sources ?? [])
+    .map((s) => slash(path.relative(root, path.resolve(dir, s))))
+    .filter((s) => !s.startsWith('../') && !path.isAbsolute(s) && !s.split('/').includes('node_modules'));
+};
+
+// A majority, not every source: a stray module merged into the real chunk must not hide it.
+const isOwnedBy = (sources, owner) => sources.filter((s) => s.startsWith(owner)).length * 2 > sources.length;
+
 const checkInvariants = (b) => {
   let ok = true;
-  for (const { chunk, marker, home, source } of INVARIANTS) {
-    const matches = b.files.filter((f) => baseName(f) === chunk);
+  for (const { chunk, owner, marker, home, source } of INVARIANTS) {
+    const named = b.files.filter((f) => baseName(f) === chunk);
+    const unmapped = named.filter((f) => repoSources(b, f) === null);
+    const matches = named.filter((f) => isOwnedBy(repoSources(b, f) ?? [], owner));
     const homes = b.files.filter((f) => baseName(f) === home);
     let verdict = 'ok';
-    if (matches.length !== 1) {
-      verdict = `FAIL - expected one ${chunk} chunk, found ${matches.length}`;
+    if (unmapped.length > 0) {
+      verdict = `FAIL - ${unmapped.join(', ')} has no sourcemap; measure a \`bundle-report build\` output`;
+    } else if (matches.length !== 1) {
+      verdict = `FAIL - expected one ${chunk} chunk made mostly of ${owner} sources, found ${matches.length}`;
     } else {
       const count = b.code.get(matches[0]).split(marker).length - 1;
       if (count > 0) verdict = `FAIL - ${count} occurrence(s)`;

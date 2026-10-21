@@ -8,7 +8,8 @@ const ROOT = pathResolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ALIAS = '<SRC_DIR>/';
 const EXT = ['.ts', '.tsx', '.js', '.mjs', '/index.ts', '/index.tsx', '/index.js'];
 const isFile = (p) => existsSync(p) && statSync(p).isFile();
-const complete = (base) => (isFile(base) ? base : EXT.map((e) => base + e).find(isFile));
+// A `.js` / `.jsx` specifier may name a `.ts` / `.tsx` sibling (the NodeNext import convention).
+const complete = (base) => (isFile(base) ? base : [...EXT.map((e) => base + e), base.replace(/\.js$/, '.ts'), base.replace(/\.jsx$/, '.tsx')].find(isFile));
 
 export function resolve(specifier, context, next) {
   let base = null;

@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import type { PluginOption } from 'vite';
 
-const BASE_PATH = '/'; // the app's base path, with both slashes - the same value Vite's `base` gets
+const BASE_PATH = '/stockroom/'; // the app's base path, with both slashes - the same value Vite's `base` gets
 const root = process.cwd(); // the tree this config file belongs to
 
 export const TreeMarkerPlugin: PluginOption = {

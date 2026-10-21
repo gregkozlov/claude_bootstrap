@@ -10,7 +10,7 @@ The always-on rules are in `CLAUDE.md` (Development Workflow) and the `lifecycle
 
 ## A ledger, not an archive
 
-- **`task-<slug>.md`** holds the Brief, the file list, the step-2a consumer list, every finding with its decision, one line per round of changes and the open risks. It is reconciled before the closing reply, and is never a pasted report.
+- **`task-<slug>.md`** holds the Brief, the file list, the step-2a consumer list, every finding with its decision, every decision taken on the user's behalf, the measured facts with their source, one line per round of changes and the open risks. It is reconciled before the closing reply, and is never a pasted report.
 - **`agents.md`** rows are `record-activity.mjs`'s alone.
   - The first file written into the folder makes it create the ledger from this session's launch event records. So the launches from before the folder existed get their rows too, and every launch after appends one.
   - The match is by session id. A plan accepted with cleared context starts a new id, so its plan-mode launches are left out.

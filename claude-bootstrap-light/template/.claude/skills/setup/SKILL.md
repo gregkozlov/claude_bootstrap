@@ -1,6 +1,6 @@
 ---
 name: setup
-description: First-run fill of this working layer for the project it was just copied into - inspect the repo, merge with whatever Claude config it already had, fill the placeholders and the [fill] sections, self-test the guard. Use on "/setup", "set up the layer", "finish the bootstrap", or when a file under .claude/ or CLAUDE.md still carries an unfilled placeholder.
+description: First-run fill of this working layer for the project it was just copied into - inspect the repo, merge with whatever Claude config it already had, fill the placeholders and the [fill] sections, self-test the guard. Use on /setup, or when CLAUDE.md or .claude/ still carries an unfilled placeholder.
 ---
 
 # setup
@@ -39,14 +39,14 @@ ls -a | grep -i "claude\|agents\.md\|cursorrules"      # untracked ones too
 
 **Which copy is which** is decided by the text, never by the name: the layer's own `CLAUDE.md` opens with the bootstrap note and carries `[fill]` markers and unfilled placeholder tokens in angle brackets; the project's own carries neither. Read the first 40 lines of each candidate before deciding.
 
-**How the layer arrived** changes only one thing - whether `.gitignore` was handled. `install.mjs` appends the block; a hand copy does not, so step 6's `git check-ignore` is the check that matters. Confirm the layer is complete either way: `CLAUDE.md`, `.claude/settings.json`, `.claude/agents/hunt.md`, `.claude/hooks/guard.mjs`, `.claude/hooks/tests/` (two files), `.claude/hooks/README.md`, `.claude/skills/{setup,debug,handoff,retro}/SKILL.md`. Name anything missing in the report rather than writing it from memory.
+**How the layer arrived** changes only one thing - whether `.gitignore` was handled. `install.mjs` appends the block; a hand copy does not, so step 6's `git check-ignore` is the check that matters. Confirm the layer is complete either way: `CLAUDE.md`, `.claude/settings.json`, `.claude/agents/hunt.md`, `.claude/hooks/guard.mjs`, `.claude/hooks/tests/` (two files), `.claude/hooks/README.md`, `.claude/skills/{setup,debug,handoff,retro,maintain-ai-layer}/SKILL.md`, `.claude/skills/maintain-ai-layer/layer-refs.mjs`. Name anything missing in the report rather than writing it from memory.
 
 Then classify each hit before touching anything:
 
 - **The project's own instructions file, whatever it is called now** - the `CLAUDE.md` that predates the layer, or the `claude_old.md` / `CLAUDE.light.md` / `CLAUDE.bootstrap.md` the rename or the installer produced. Merge, do not concatenate: the old file's **project facts** (commands, architecture, conventions, prohibitions) move into the matching `[fill]` sections of the layer's copy, and the layer's process sections stay as they are. A statement in the old file that contradicts the layer (a different lifecycle, a different review policy, "commit when done") is **not merged silently**: list it in the report as a conflict with your recommendation, and let the user settle it. When the merge is done and the user has seen it, the merged text is what lives in `CLAUDE.md`. **The leftover file is deleted only if the layer created it** (`CLAUDE.light.md`, `CLAUDE.bootstrap.md`) - a file the user renamed by hand is theirs: say it can go, and leave it.
 - **`AGENTS.md`, `.cursorrules`, a `README` section of instructions** - another tool's rules for the same repo. Read them for project facts worth merging, but never delete or rewrite them; they belong to that tool.
 - **`.claude/settings.json` that already exists.** The installer kept it. Merge by hand: add the layer's `PreToolUse` guard registration to its `hooks`, and the `deny` / `allow` entries it lacks. Never drop an entry that was there, and never move a personal one into the tracked file - if it has a `settings.local.json`, leave it untouched.
-- **Existing agents, skills, commands or hooks.** Leave them. Report a name collision (their `hunt`, `debug`, `handoff`, `retro` or `setup` against the layer's) instead of resolving it yourself - the layer's file is the newcomer, so it is the one that gets renamed if the user wants both.
+- **Existing agents, skills, commands or hooks.** Leave them. Report a name collision (their `hunt`, `debug`, `handoff`, `retro`, `maintain-ai-layer` or `setup` against the layer's) instead of resolving it yourself - the layer's file is the newcomer, so it is the one that gets renamed if the user wants both.
 - **A different Claude layer entirely** (a full bootstrap, a team layer with rules and its own lifecycle). Stop and say so: two lifecycles in one repo is a decision for the user, not a merge.
 
 ## 3. The values
@@ -71,16 +71,18 @@ Ask only what changes the outcome. Typical items: the check command when the pro
 
 ## 5. Fill
 
-**Five files carry placeholders, and this skill is not one of them.** Fill exactly these, with the Edit tool, never from the shell:
+**Seven files carry placeholders, and this skill is not one of them.** Fill exactly these, with the Edit tool, never from the shell:
 
 1. `CLAUDE.md`
 2. `.claude/settings.json` - the check command in `allow`
-3. `.claude/hooks/guard.mjs` - the generated paths, and the source directory in two regexes
+3. `.claude/hooks/guard.mjs` - the generated paths, and the source directory in two regexes and one refusal message
 4. `.claude/agents/hunt.md` - project and stack
-5. `.claude/hooks/tests/guard-shell-test.mjs` - the source directory, in every case that names a path. Left unfilled, that suite fails eight cases that have nothing wrong with them.
+5. `.claude/hooks/tests/guard-shell-test.mjs` - the source directory, in every case that names a path. Left unfilled, that suite fails the cases built from it, with nothing wrong with them.
+6. `.claude/skills/maintain-ai-layer/layer-refs.mjs` - the source directory in `PREFIXES`; add the project's other top-level folders a doc names by path.
+7. `.claude/hooks/tests/guard-test.mjs` - the source directory in the two write-fence cases. Left unfilled once `guard.mjs` is filled, `hunt Write of its probe (allow)` fails.
 
 ```bash
-grep -rln "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills   # the five, to confirm the list
+grep -rln "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills .claude/skills/maintain-ai-layer/layer-refs.mjs   # the seven, to confirm the list
 ```
 
 Then the `[fill]` sections of `CLAUDE.md` (`grep -n "\[fill\]" CLAUDE.md`), written from the repo, and finally **delete the bootstrap note at the top of `CLAUDE.md`** - it is an instruction to run this skill, and every later session would pay for it on every turn:
@@ -96,15 +98,16 @@ Finally, tune `.claude/agents/hunt.md`: delete the attack-angle classes the stac
 
 ```bash
 node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs   # every line "ok"
-grep -rn "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills                      # no hits left
-git check-ignore -v .claude/settings.json                                                  # must print nothing
+grep -rn "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=skills .claude/skills/maintain-ai-layer/layer-refs.mjs   # no hits left
+node .claude/skills/maintain-ai-layer/layer-refs.mjs                                       # every hit explained
+git check-ignore CLAUDE.md .claude/settings.json .claude/agents/hunt.md .claude/hooks/guard.mjs .claude/skills/setup/SKILL.md   # must print nothing
 ```
 
 Then run the project's check command once, so its output is a fact and not an assumption.
 
 A failing guard case is a bad generated-path regex nine times out of ten - fix the regex, not the test. Add one case per generated path (`guard-test.mjs` carries two commented lines showing the shape); without them nothing proves the list is live, since an empty list also passes. A failing check command is reported as the project's pre-existing state, never fixed here.
 
-`git check-ignore` printing a rule means the layer is invisible to git - a `.gitignore` line like `.claude/` keeps git from descending into the folder, so no negation after it can rescue the files. Tell the user, and propose replacing that line with:
+`git check-ignore` printing a path means that part of the layer is invisible to git - a `.gitignore` line like `.claude/` keeps git from descending into the folder, so no negation after it can rescue the files, and a `.claude/*` without the negations below hides every folder it does not negate. Tell the user, and propose replacing that line with:
 
 ```
 .claude/*

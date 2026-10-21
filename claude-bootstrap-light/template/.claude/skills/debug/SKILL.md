@@ -1,11 +1,11 @@
 ---
 name: debug
-description: Root cause before any fix. Load it for every bug report before touching code - a screenshot, "it does not work", "why does it", "find out why", a console error, a wrong number, "/debug".
+description: The procedure for every bug report. Load it before touching code - a screenshot, "it does not work", "why does it", "find out why", a console error, a wrong number, "/debug".
 ---
 
 # debug
 
-A bug report is a symptom with a story attached. The tempting move is to change the code that looks responsible and see whether the story goes away; that is how a `?? 0`, a `try / catch` or a second effect lands on top of a cause that stays. **Nothing is edited until the cause is named.**
+A bug report is a symptom with a story attached. The tempting move is to change the code that looks responsible and see whether the story goes away; that is how a `?? 0`, a `try / catch` or a second effect lands on top of a cause that stays. **Nothing is edited until the cause is named**, but for the tagged instrumentation of phase 2.
 
 ## 0. What arrived
 
@@ -18,6 +18,7 @@ Then, still before reading code: **what moved since it last worked?** `git log -
 Run it: the app, the command, the script, with the user's inputs. The bug is reproduced when **you have observed** the wrong value, state or behaviour, not when the code "would" produce it.
 
 - Reproduced: keep the exact steps, they are the proof in phase 4.
+- **Intermittent** (it shows on some runs, not on others): repeat the trigger under the same conditions before any diagnosis and note the rate (`3 of 10 loads`); only then change one variable per run. The phase-4 re-run repeats the same number of tries - one clean try of a bug seen in three of ten proves nothing.
 - Not reproducible on the data you can reach (a tenant, a permission, a day with no data): say so, name what would be needed, and offer instrumentation or a targeted question instead of a fix. **No fix ships for a bug nobody has seen.**
 - Nothing to run it against (no server, no credentials, no sample data): phase 0 and the static half of phase 2 still run, then the turn ends asking the owner for what is missing - no named cause, no fix.
 
@@ -33,6 +34,8 @@ Follow the value from its source to what the user saw, and find the **first** bo
 Two facts per boundary: expected and observed. The divergence sits at exactly one of them; everything downstream is a consequence, not a cause.
 
 The cheapest instrument is a **working twin**: the sibling that produces the same value correctly (the other screen, the other endpoint, the previous release). Diff the broken site against it at each boundary - every difference, however small, is a candidate, and the list is usually short.
+
+**Temporary instrumentation** - a log line, a debug attribute, a forced flag - is the one edit allowed before the cause is named: it observes and fixes nothing. It goes only at a boundary that separates the surviving hypotheses, every line carries one tag, `DEBUG-PROBE <short task name>`, and that tag is grepped to zero before the fix lands - nothing else is guaranteed to catch a leftover.
 
 ## 3. Name the cause
 
@@ -52,7 +55,7 @@ The smallest change at the cause, not at the symptom. Say the class, then run th
 
 ## Anti-patterns
 
-- Editing code to "see if it helps". Every edit before phase 3 is a guess with a diff attached.
+- Editing code to "see if it helps". Every edit before phase 3 but the tagged instrumentation of phase 2 is a guess with a diff attached.
 - Catching the symptom - `?? 0`, `try / catch`, an `if (!data) return null` - where the cause is upstream.
 - Declaring an upstream bug from the rendered value without the raw response.
 - Reproducing from the ticket text instead of the running thing: the ticket is a hypothesis, the observation is the fact.

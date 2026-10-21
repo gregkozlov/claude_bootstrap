@@ -6,12 +6,13 @@
 //
 //   --config   answers as JSON (see bootstrap.config.example.json); without it the questions are asked
 //              on the terminal, and the answers are printed at the end so they can be saved for a re-run
-//   --force    overwrite files that already exist in the target (default: keep them and say so)
+//   --force    overwrite files that already exist in the target (default: keep them and say so) - never the
+//              project's CLAUDE.md or .claude/settings.json, which /setup merges
 //   --dry-run  print what would be written, write nothing
 //
 // examples/ is never copied - it is reference material. No dependencies; Node 18+.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -74,10 +75,20 @@ function validate(answers) {
       }
     } else if (typeof value !== 'string' || !value.trim()) problems.push(`${key}: must be a non-empty string`);
   }
+  // The values land inside JS and JSON string literals unescaped, so a quote, a backslash or a backtick breaks
+  // settings.json or a hook - and a hook that does not parse lets every call through.
   if (typeof answers.SRC_DIR === 'string' && /[\\/]$/.test(answers.SRC_DIR)) problems.push('SRC_DIR: no trailing slash');
-  if (typeof answers.DEV_PORT_RANGE === 'string' && !/^\d+-\d+$/.test(answers.DEV_PORT_RANGE)) problems.push('DEV_PORT_RANGE: expected "from-to", e.g. 5173-5179');
+  else if (typeof answers.SRC_DIR === 'string' && !/^[A-Za-z0-9_@-][\w.@/-]*$/.test(answers.SRC_DIR)) problems.push('SRC_DIR: a relative path with forward slashes, no "./", spaces or backslashes');
+  if (typeof answers.DEV_PORT_RANGE === 'string') {
+    const ports = answers.DEV_PORT_RANGE.match(/^(\d+)-(\d+)$/);
+    if (!ports) problems.push('DEV_PORT_RANGE: expected "from-to", e.g. 5173-5179');
+    else if (Number(ports[1]) > Number(ports[2])) problems.push('DEV_PORT_RANGE: "from" must not be above "to"');
+  }
   if (typeof answers.DEV_BASE_PATH === 'string' && !/^\/.*\/$|^\/$/.test(answers.DEV_BASE_PATH)) problems.push('DEV_BASE_PATH: must start and end with "/"');
+  else if (typeof answers.DEV_BASE_PATH === 'string' && /["'`\\\s]/.test(answers.DEV_BASE_PATH)) problems.push('DEV_BASE_PATH: no quotes, backslashes or spaces');
   if (typeof answers.CHECK_COMMAND === 'string' && /[<>|&;]/.test(answers.CHECK_COMMAND)) problems.push('CHECK_COMMAND: one plain command, no shell operators');
+  else if (typeof answers.CHECK_COMMAND === 'string' && /["'`\\]/.test(answers.CHECK_COMMAND)) problems.push('CHECK_COMMAND: no quotes or backslashes - wrap it in a package script');
+  if (Array.isArray(answers.GENERATED_PATHS) && answers.GENERATED_PATHS.some((source) => typeof source === 'string' && /`|\$\{/.test(source))) problems.push('GENERATED_PATHS: no backtick or "${" in a regex');
   return problems;
 }
 
@@ -137,29 +148,40 @@ const GITIGNORE_CLAUDE_BLOCK = [
   '!.claude/scripts/',
   '!.claude/docs/',
   '!.claude/settings.json',
+  '!.claude/settings.local.example.json',
   '# .claude/sessions/ is deliberately not negated: one folder per session holding its own task file and',
   '# handoff, personal and temporary, pruned by hand.',
+  'CLAUDE.local.md',
 ];
 
 function ensureGitignore(target, dryRun) {
   const file = join(target, '.gitignore');
-  const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  const additions = [];
-  if (!current.includes('.claude')) additions.push(...GITIGNORE_CLAUDE_BLOCK);
-  if (additions.length === 0) return 'unchanged';
-  if (!dryRun) appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}${additions.join('\n')}\n`, 'utf8');
-  return `${existsSync(file) ? 'appended' : 'created'}: ${additions.filter((line) => !line.startsWith('#')).join(', ')}`;
+  const existed = existsSync(file);
+  const current = existed ? readFileSync(file, 'utf8') : '';
+  const block = GITIGNORE_CLAUDE_BLOCK.filter((line) => !line.startsWith('#'));
+  if (/^\s*\/?\.claude\/?\s*$/m.test(current)) {
+    return `left alone, AND IT HIDES THE LAYER: a bare .claude line keeps git out of the folder, so no negation can rescue it. Replace that line with:\n  ${block.join('\n  ')}`;
+  }
+  if (/^\s*\/?\.claude\/\*\s*$/m.test(current)) return 'unchanged (it already carries a .claude/* block - /setup proves its negations)';
+  if (!dryRun) appendFileSync(file, `${current && !current.endsWith('\n') ? '\n' : ''}${GITIGNORE_CLAUDE_BLOCK.join('\n')}\n`, 'utf8');
+  return `${dryRun ? 'would be ' : ''}${existed ? 'appended' : 'created'}: ${block.join(', ')}`;
 }
 
 const options = parseArgs(process.argv.slice(2));
 const target = resolve(options.target);
 if (!existsSync(target) || !statSync(target).isDirectory()) usage(`${target} is not a directory`);
-if (resolve(target) === resolve(HERE)) usage('the target is the bootstrap folder itself');
+const fromHere = relative(HERE, target);
+if (!fromHere.startsWith('..') && !isAbsolute(fromHere)) usage('the target is the bootstrap folder itself, or inside it');
 
 let answers;
 let fromFile = false;
 if (options.config) {
-  answers = JSON.parse(readFileSync(resolve(options.config), 'utf8'));
+  try {
+    answers = JSON.parse(readFileSync(resolve(options.config), 'utf8'));
+  } catch (error) {
+    usage(`--config: ${error.message}`);
+  }
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) usage('--config: expected a JSON object of answers');
   fromFile = true;
 } else {
   answers = await askAnswers();
@@ -177,15 +199,19 @@ for (const source of walk(TEMPLATE)) {
   const rel = relative(TEMPLATE, source);
   let destination = join(target, rel);
   let show = rel.split(sep).join('/');
-  // The project's own CLAUDE.md is never replaced, but the layer's has to reach the project anyway: the `setup`
-  // skill merges the two, and the bootstrap folder it would otherwise read from is not reachable from there.
-  if (show === 'CLAUDE.md' && existsSync(destination) && !options.force) {
+  // The project's own CLAUDE.md is never replaced, not even by --force, but the layer's has to reach the project
+  // anyway: the `setup` skill merges the two, and the bootstrap folder it would otherwise read from is not
+  // reachable from there. settings.json carries the project's own entries, so --force keeps it too.
+  if (show === 'CLAUDE.md' && existsSync(destination)) {
     destination = join(target, 'CLAUDE.bootstrap.md');
     show = 'CLAUDE.bootstrap.md (the project already has a CLAUDE.md - /setup merges them)';
-    if (existsSync(destination)) {
+    if (existsSync(destination) && !options.force) {
       kept.push('CLAUDE.bootstrap.md');
       continue;
     }
+  } else if (show === '.claude/settings.json' && existsSync(destination)) {
+    kept.push('.claude/settings.json (kept even with --force - /setup merges the hook registrations into it)');
+    continue;
   } else if (existsSync(destination) && !options.force) {
     kept.push(show);
     continue;
@@ -221,12 +247,15 @@ must end up done, whoever does it.
 
 Manual steps left - in this order:
   1. CLAUDE.md: write every [fill] section (grep -n "\\[fill\\]" CLAUDE.md), then delete the bootstrap note at the top.
-     Keep it under 48 KB (wc -c CLAUDE.md).
+     Keep it under 48 000 bytes (wc -c CLAUDE.md).
   2. .claude/agents/twins.md: fill "Known twins"; .claude/agents/comments.md: the artefacts other agents own;
      .claude/skills/lifecycle/SKILL.md: the project's editor agents at step 4 (its [fill] lines);
-     .claude/skills/maintain-ai-layer/SKILL.md: the three source areas of step D2.
-  3. .claude/skills/crosscheck/SKILL.md: replace the signal list with this project's risk classes;
-     .claude/skills/verify-live/SKILL.md: every [fill] line (grep -n "\\[fill\\]" .claude/skills/verify-live/SKILL.md).
+     .claude/skills/maintain-ai-layer/references/deep.md: the three source areas of step D2, and PREFIXES in
+     .claude/skills/maintain-ai-layer/layer-refs.mjs; .claude/skills/crosscheck/SKILL.md: replace the signal
+     list with this project's risk classes; .claude/skills/verify-live/SKILL.md: every [fill] line
+     (grep -n "\\[fill\\]" .claude/skills/verify-live/SKILL.md).
+  3. .claude/agents/hunt.md: keep the shape of the attack angles, replace the classes the project does not have,
+     and feed it every bug that surfaces after a review (examples/hunt-example.md shows a fed library).
   4. Self-test the guard:  node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs
      Add a test case per entry in GENERATED_PATHS (the two commented lines in guard-test.mjs).
   5. Exclude ${answers.SRC_DIR}/__hunt_probe*.ts from the build and lint configs, so a probe live while gate runs
@@ -236,7 +265,8 @@ Manual steps left - in this order:
   6. Add "node .claude/scripts/rules-reach.mjs --check" to "${answers.CHECK_COMMAND}" (Node 22.5+ or 20.17+, git)
      and run it once - the two shipped rules and their fixture pairs must pass.
   7. Optional Stop gate: copy .claude/settings.local.example.json to .claude/settings.local.json (gitignored),
-     in every worktree. It runs "${answers.CHECK_COMMAND}" at the end of a turn that changed a file.
+     in every worktree. It runs "${answers.CHECK_COMMAND}" at the end of a turn that changed a file, and sets
+     CLAUDE_CODE_MAX_RETRIES=15 so an API outage is retried longer before the turn dies.
      It waits on this session's own writing agents by itself; a project editor agent that owns one checker gets
      that checker split out of CHECKS in verify-gate.mjs, deferred on the agent (.claude/hooks/README.md).
   8. Browser projects: add the /__tree marker endpoint (examples/tree-marker-plugin.ts in the bootstrap folder

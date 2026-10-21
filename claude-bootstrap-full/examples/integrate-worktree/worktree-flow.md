@@ -43,6 +43,7 @@ Run from `<repo>`, in your own terminal:
 
 ```bash
 git worktree add "<worktrees-root>/<name>" -b "wt/<name>"
+git config branch.wt/<name>.pushRemote no-push   # push.autoSetupRemote would publish wt/<name> on a bare git push
 ```
 
 Put the tree **outside** `<repo>`. Section 8 says why.
@@ -81,12 +82,13 @@ The Stop gate registration is in `.claude/hooks/README.md`. `gate-registered.mjs
 
 ### Git config, once per clone
 
-Git config is shared by every tree of the clone, so set these once:
+Git config is shared by every tree of the clone, so set this once:
 
 ```bash
 git config merge.conflictStyle zdiff3   # a conflict hunk also shows the common base
-git config rerere.enabled true          # when a conflict can recur - see section 8
 ```
+
+`rerere` stays off until the owner turns it on (`git config rerere.enabled true`) - a call worth making when a conflict can recur, see section 8.
 
 Without `zdiff3` a conflict shows only the two sides, and you often cannot tell who changed what.
 
@@ -139,6 +141,8 @@ One setting is not enough. It stops only *new* detection. A repository already r
 ```
 
 When you add a tree, add its path to every other tree's `ignoredRepositories`. `.vscode/` is gitignored and does not travel.
+
+In the second tree's copy only, add `"git.showActionButton": { "publish": false }`: there Publish would push `wt/<name>`.
 
 ---
 
@@ -229,7 +233,7 @@ If the ref `wt/<name>-prerebase` was never created, git keeps `ORIG_HEAD` (the t
 
 A finished rebase is not the same as a rebase that kept both sides. Each resolved conflict is a hand edit, and a hand edit can drop an intent silently. The build stays green, no test is guaranteed to cover the dropped intent, and the feature is simply gone.
 
-Nothing downstream catches that - not `type-check`, not `lint`, not a semantic pass that reads the two sides rather than the result.
+Nothing downstream reliably catches that - not `type-check`, not `lint`, not a semantic pass that reads the two sides rather than the result.
 
 **Both loss checks read `main..wt/<name>`, which is empty once the merge lands.** Run afterwards, they compare nothing and exit 0 - a false green.
 
@@ -309,7 +313,7 @@ Everything else runs from anywhere. `git -C <path>` behaves as if git were start
 - **The second tree does not live inside the repo.** A nested tree would resolve `node_modules` upward and save an install. But `npm run lint` in `main` would then fail on the other task's code (`--max-warnings 0`), `git status` would show the tree as untracked, and one shared dependency tree means a dependency task in `main` shifts versions under the running work. Avoiding that needs edits to the team's `eslint.config.mjs` and `.gitignore`.
 - **The built-in `.claude/worktrees/` location is not used either.** It saves the `.gitignore` edit (the `.claude/*` rule covers it) but not the eslint one: eslint does descend into dot folders.
 - **Nothing to "share" by nesting.** `CLAUDE.md`, skills, agents, rules and `settings.json` are tracked and already in every tree.
-- **`rerere` is enabled wherever a conflict can recur - and that is two cases, not one.**
+- **`rerere` is off until the owner turns it on; it pays wherever a conflict can recur - and that is two cases, not one.**
   - Several trees: merge one, rebase the others, and the same conflict resurfaces on each remaining branch.
   - One tree: a rebase replays commits one by one, so a file that conflicts on commit 2 conflicts again on commit 5. `rerere` replays your earlier resolution instead of asking twice.
   - It pays nothing only with one tree and one commit on the branch.
@@ -356,7 +360,7 @@ And the integration cost grows faster than the tree count. Two branches give thr
 
 **Integrate strictly one branch at a time**, each through the full cycle, smallest overlap first. The skill orders them when it finds several.
 
-`rerere` ("reuse recorded resolution") records a conflict's fingerprint and **your** resolution, and replays it on an identical conflict. Notes:
+`rerere` ("reuse recorded resolution") records a conflict's fingerprint and **your** resolution, and replays it on an identical conflict. Once it is on:
 
 - The cache is in `.git/rr-cache/`, shared by every tree.
 - It fires only on an **identical** conflict; one changed context line is a miss.

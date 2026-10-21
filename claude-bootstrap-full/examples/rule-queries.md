@@ -18,7 +18,7 @@ paths:
   - 'src/api/*/*.ts'
 ---
 
-> Example from an inventory analytics frontend (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. A path-scoped rule with a measured glob list; note the greps standing in for counts.
+> Example from an inventory analytics frontend (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. A path-scoped rule with a measured glob list; note the greps standing in for counts. The `.claude/rules/*.md` files it points to are the example project's own rules, not shipped.
 
 # Query call sites
 

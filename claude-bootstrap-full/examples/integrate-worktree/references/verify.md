@@ -1,12 +1,14 @@
+> Example from the example app, Stockroom (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. Reference for integrate-worktree.
+
 # Mode 3: verify
 
-`WTB-prerebase` exists and `main` is an ancestor of `WTB`, so the rebase happened. Both counts at zero means the merge landed too - check which, and say so, rather than reporting a pending merge as done or a done merge as pending.
+`WTB-prerebase` exists and `main` is an ancestor of `WTB`, so the rebase (or `git merge main`) happened. Both counts at zero means the merge landed too - check which, and say so, rather than reporting a pending merge as done or a done merge as pending.
 
 ## Prove nothing was lost - before anything else, and before the merge
 
-**Both checks below read `main..WTB`, which is empty once the merge has landed** - `main` and `WTB` are then the same commit and the commands compare nothing while exiting 0. Run them in the window between the rebase and the merge. If the merge already happened, substitute `main~<N>..main` for `main..WTB`, where `<N>` is `git rev-list --count $(git merge-base main WTB-prerebase)..WTB-prerebase` - valid only while the merge was a fast-forward and nothing landed on `main` after it.
+**Both checks below read `main..WTB`, which is empty once the merge has landed** - `main` and `WTB` are then the same commit and the commands compare nothing while exiting 0. Run them in the window between the rebase and the merge. If the merge already happened, substitute `<pre>..main` for `main..WTB`, where `<pre>` is `main` before the merge - `git rev-parse 'main@{1}'` (quoted for PowerShell) while `git reflog -1 main` still reads `merge WTB: Fast-forward` - valid only while the merge was a fast-forward and nothing landed on `main` after it. A count of `WTB-prerebase`'s commits is not a substitute: a commit the rebase dropped shortens the branch, and `main~<N>` then reaches into `main`'s own work.
 
-Every conflict resolved in mode 2 is a hand edit that can drop an intent with the build still green, and nothing downstream catches it. Run both checks whenever any conflict was resolved, and check 1 even when none was.
+Every conflict resolved in mode 2 is a hand edit that can drop an intent with the build still green, and nothing downstream reliably catches it. Run both checks whenever any conflict was resolved, and check 1 even when none was.
 
 **1. Did the branch's own commits survive the replay?**
 
@@ -14,7 +16,9 @@ Every conflict resolved in mode 2 is a hand edit that can drop an intent with th
 git range-diff $(git merge-base main WTB-prerebase)..WTB-prerebase main..WTB
 ```
 
-This pairs each pre-rebase commit with its replayed counterpart. A clean replay marks every pair `=`. Every `!` is a commit whose content changed while being replayed, which is either a conflict resolution that was intended or a change that was lost - the output cannot tell you which, so read each one. This is what `WTB-prerebase` exists for, and why the command block creates it before the rebase rather than after.
+This pairs each pre-rebase commit with its replayed counterpart. A clean replay marks every pair `=`. Every `!` is a commit whose content changed while being replayed, which is either a conflict resolution that was intended or a change that was lost - the output cannot tell you which, so read each one. A `<` with no partner is a commit the rebase dropped (a `--skip`, a resolution that emptied it, or one git found already applied on `main`) - check which; a `>` with no partner is a commit that was not on the branch before. This is what `WTB-prerebase` exists for, and why the command block creates it before the rebase rather than after.
+
+**On the `git merge main` route** the branch's commits are not replayed, so every pair reads `=` and range-diff skips merge commits: a resolution that dropped the branch's own hunk shows nowhere above. For every sha of `git log --merges --format=%h main..WTB`, `git show --remerge-diff <sha>` prints exactly what the hand resolution changed against git's automatic merge, and each hunk there is a decision to confirm.
 
 All `=` is one facts-block entry (`loss checks clean`). A single `!` is the report: paste the pair, say which hunk moved, and settle whether it was the resolution or a loss.
 

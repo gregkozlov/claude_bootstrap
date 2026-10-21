@@ -1,6 +1,7 @@
 ---
 name: fix-improvements
-description: Work the localDocs/improvements.md backlog (ids like P0.3, not tracker ids like PROJ-123) one ticket at a time, planning without implementing. Use on "/fix-improvements", "next ticket", an id like "P0.3", or `close <id>` / `release <id>`.
+description: Work the localDocs/improvements.md backlog (ids like P0.3) one ticket at a time, planning without implementing. Use on "/fix-improvements", "next ticket", "take the next improvement", and `close <id>` / `release <id>`.
+argument-hint: '[<id> [deep | inline] | close [<id>] | release [<id>]]'
 ---
 
 > Example from an inventory analytics frontend (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. Depends on: a gitignored localDocs/improvements.md backlog with numbered tickets, and the tracked .claude/docs/decisions.md. Takes one ticket through the lifecycle.
@@ -13,7 +14,7 @@ A ticket is a hypothesis with a one-line `Fix:` clause on the end, not a work or
 
 ## The backlog file
 
-**`<main>/localDocs/improvements.md`** - always this absolute path, from every session, in every worktree. `<main>` is the main tree's absolute path: the `git worktree list` entry that holds `main`.
+**`<main>/localDocs/improvements.md`** - always this absolute path, from every session, in every worktree. `<main>` is the main tree's absolute path: the first entry of `git worktree list` (the main worktree, whatever branch it has checked out).
 
 `localDocs/` is gitignored, so it sits outside git entirely - no history, no merge, and `git worktree add` does not copy it. Cross-worktree claiming only works while every agent edits that one file. **Never** open a relative `localDocs/improvements.md`, and **never** create one in a worktree: a second copy silently forks the backlog and every claim marker stops meaning anything - both reads succeed, and each tree goes on seeing a plausible backlog.
 

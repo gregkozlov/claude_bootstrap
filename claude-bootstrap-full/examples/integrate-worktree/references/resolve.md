@@ -1,3 +1,5 @@
+> Example from the example app, Stockroom (React 19 + MUI + TanStack Query v5 + i18next). Not copied by apply.mjs. Reference for integrate-worktree.
+
 # Mode 2: resolve
 
 A rebase is in progress and stopped on a conflict. The boundary in `SKILL.md` holds here too: this mode edits files, and the user runs every git command.
@@ -9,7 +11,7 @@ During a rebase git checks out the upstream and replays the branch on top. There
 - `--ours` is **`main`** - the integration target
 - `--theirs` is **the `WTB` commit** currently being replayed
 
-The opposite of what the names suggest. This is why the skill never emits those flags: two independent pieces of work almost always need **both** changes, and each flag discards one side wholesale.
+The opposite of what the names suggest - and reversed again on the `git -C WT merge main` route, where `MERGE_HEAD` marks the stop, `--ours` is `WTB` and `--theirs` is `main`; the procedure below holds there with `MERGE_HEAD` for `main` in the log commands, and `git -C WT merge --continue` for `rebase --continue`. This is why the skill never emits those flags: two independent pieces of work almost always need **both** changes, and each flag discards one side wholesale.
 
 ## Procedure, per conflicted file
 
@@ -21,7 +23,7 @@ git -C WT log -p <merge-base>..main -- <file>                   # what main did
 git -C WT log -p <merge-base>..WTB-prerebase -- <file>          # what the worktree branch did
 ```
 
-With `merge.conflictStyle = zdiff3` (a per-clone setting, `.claude/docs/worktree-flow.md` setup) each hunk also shows the common ancestor between the two sides. Use it: without the base you cannot tell which side changed what. If a hunk shows no `|||||||` base section, the setting is off - read the base with `git show :1:<file>`.
+With `merge.conflictStyle = zdiff3` (`.claude/docs/worktree-flow.md` setup, or the global `~/.gitconfig` - `git config --show-origin --get merge.conflictStyle` says which) each hunk also shows the common ancestor between the two sides. Use it: without the base you cannot tell which side changed what. If a hunk shows no `|||||||` base section, the setting is off - read the base with `git -C WT show :1:<path>` (`<path>` relative to `WT`).
 
 If `WTB-prerebase` was never created, git maintains two refs of its own during a rebase: `ORIG_HEAD` (the pre-rebase tip) and `REBASE_HEAD` (the commit currently being replayed). Substitute `ORIG_HEAD` in the commands above.
 

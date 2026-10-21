@@ -1,5 +1,5 @@
-// Self-test for guard.mjs, Bash / PowerShell payloads: git verbs, gh, movers and the delete grant, in-place edits,
-// redirect targets, the working directory and comments.
+// Self-test for guard.mjs, Bash / PowerShell payloads: git verbs, read git that runs or writes, gh, movers and the
+// delete grant, in-place edits, redirect targets, leading-literal variables, the working directory and comments.
 //   node .claude/hooks/tests/guard-shell-test.mjs
 // Every line must read "ok".
 import { spawnSync } from 'node:child_process';
@@ -62,6 +62,14 @@ const cases = [
   ['node -e writing a repo file (deny)', 2, `node -e "require('fs').writeFileSync('<SRC_DIR>/x.ts', 'a')"`],
   ['node -e writing a computed path (deny)', 2, `node -e "fs.writeFileSync(path.join(root, 'a.ts'), body)"`],
   ['node -e writing to Temp (allow)', 0, `node -e "require('fs').writeFileSync('C:/Users/x/AppData/Local/Temp/a.json', 'a')"`],
+  // read git that runs a program or writes a file, judged on the words git receives
+  ['git grep -O runs a program (deny)', 2, 'git grep -Ocat x'],
+  ['git grep -O in a cluster (deny)', 2, 'git grep -nOcat x'],
+  ['git grep -O split by quotes (deny)', 2, 'git grep -"O"cat x'],
+  ['git grep --open-files-in-pager abbreviated (deny)', 2, 'git grep --op=cat x'],
+  ['git diff --output into the tree (deny)', 2, 'git diff --output=<SRC_DIR>/x.diff'],
+  ['git log --output (deny, PowerShell)', 2, 'git log --output <SRC_DIR>/x.txt'],
+  ['git grep -n (allow)', 0, 'git grep -n "x" -- <SRC_DIR>'],
   ['gh pr create (deny)', 2, 'gh pr create --title x'],
   ['gh pr view (allow)', 0, 'gh pr view 12'],
   // movers: matched at command position, judged on their arguments
@@ -84,6 +92,8 @@ const cases = [
   ['Remove-Item a single file (allow, PowerShell)', 0, 'Remove-Item <SRC_DIR>/a.ts'],
   ['Remove-Item a comma list (deny, PowerShell)', 2, 'Remove-Item <SRC_DIR>/a.ts,<SRC_DIR>/b.ts'],
   ['del a directory (deny, PowerShell)', 2, 'del <SRC_DIR>/'],
+  ['rd with clustered /s/q switches (deny, PowerShell)', 2, 'rd /s/q <SRC_DIR>\\a'],
+  ['rd with clustered /q/s switches (deny)', 2, 'rd //q//s <SRC_DIR>/a'],
   // PROTECTED_PATHS - replace with the project's own pattern; with an empty list this is "allow".
   // ['rm a generated client (deny)', 2, 'rm <SRC_DIR>/api/generated/client.ts'],
   ['rm -rf the source dir (deny)', 2, 'rm -rf <SRC_DIR>'],
@@ -150,6 +160,13 @@ const cases = [
   ['gh api DELETE (deny)', 2, 'gh api -XDELETE repos/x/y'],
   ['find -delete in the tree (deny)', 2, 'find <SRC_DIR> -name "*.tmp" -delete'],
   ['find -delete under a quoted scratch root (allow)', 0, 'find "$TMP/x" -name "*.tmp" -delete'],
+  // a Bash variable a leading statement sets to a literal is judged as that literal
+  ['leading literal scratch target (allow)', 0, `O="${S}/out"; cp <SRC_DIR>/a.ts "$O/a.ts"`],
+  ['leading literal tree target (deny)', 2, 'D=<SRC_DIR>; cp /tmp/a.ts "$D/a.ts"'],
+  ['scratch name set to a project path (deny)', 2, 'S=<SRC_DIR>; echo x > "$S/a.ts"'],
+  ['scratch name set to a project path, with a comment (deny)', 2, 'S=<SRC_DIR>; echo x > "$S/a.ts" # note'],
+  ['leading literal rebound later (deny)', 2, `O="${S}/o"; cp a "$O/x"; O=<SRC_DIR>; rm -r "$O"`],
+  ['leading literal holding shell syntax (deny)', 2, 'O="/tmp/a;b"; cp a "$O"'],
   // the working directory: only a Bash subshell may move it
   ['cd then a command (deny)', 2, 'cd x && ls'],
   ['cd then a command (deny, PowerShell)', 2, 'cd x; ls'],
@@ -160,6 +177,27 @@ const cases = [
   ["git commit after a # it's comment (deny)", 2, "echo x # it's here\ngit commit -m x"],
   ["rm -rf after a # it's comment (deny)", 2, "echo x # it's here\nrm -rf <SRC_DIR>"],
   ['a # inside quotes is not a comment (allow)', 0, 'grep -n "a # b" <SRC_DIR>/x.ts'],
+  // git's synonyms and housekeeping, newer read syntax, and gh verbs that switch, publish or run
+  ['git stage (deny)', 2, 'git stage -A'],
+  ['git maintenance run (deny)', 2, 'git maintenance run'],
+  ['git submodule init (deny)', 2, 'git submodule init'],
+  ['git config get (allow)', 0, 'git config get user.name'],
+  ['gh pr checkout (deny)', 2, 'gh pr checkout 12'],
+  ['gh gist create (deny)', 2, 'gh gist create --public <SRC_DIR>/a.ts'],
+  ['gh workflow run (deny)', 2, 'gh workflow run ci.yml'],
+  // formatters through other runners
+  ['pnpm exec prettier --write (deny)', 2, 'pnpm exec prettier --write <SRC_DIR>'],
+  ['yarn eslint --fix (deny)', 2, 'yarn eslint --fix <SRC_DIR>'],
+  ['pnpm lint --fix (deny)', 2, 'pnpm lint --fix'],
+  ['biome check --write (deny)', 2, 'npx biome check --write <SRC_DIR>'],
+  // an interpreter reading its script on stdin
+  ['python heredoc writing a repo file (deny)', 2, "python - <<'EOF'\nopen('<SRC_DIR>/a.ts','w').write('x')\nEOF"],
+  ['node heredoc writing a repo file (deny)', 2, "node <<'EOF'\nrequire('fs').writeFileSync('<SRC_DIR>/a.ts','x')\nEOF"],
+  ['script piped into node (deny)', 2, `echo "require('fs').writeFileSync('<SRC_DIR>/a.ts','x')" | node`],
+  ['node heredoc that only prints (allow)', 0, "node <<'EOF'\nconsole.log(1)\nEOF"],
+  // not writes
+  ['truncate -s takes a size, not a path (allow)', 0, 'truncate -s 0 /tmp/log.txt'],
+  ['arithmetic comparison (allow)', 0, 'echo $(( 3 > 2 ))'],
 ];
 
 let failed = 0;
