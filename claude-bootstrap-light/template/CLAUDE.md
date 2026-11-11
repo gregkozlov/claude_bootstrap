@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-<!-- Bootstrap note: sections marked [fill] are the project's to write - run the `setup` skill (/setup) and it
-     writes them by reading the project. Everything else is the working layer and is meant to be kept as-is.
-     Delete this comment once the [fill] sections are written. -->
+<!-- Bootstrap note: sections marked [fill] are the project's to write - run `/maintain-ai-layer init` and it writes
+     them by reading the project, and builds the path-scoped rules beside them. Everything else is the working layer
+     and is meant to be kept as-is. `init` deletes this comment once the [fill] sections are written. -->
 
 # General Rules
 
@@ -25,7 +25,7 @@ Touch only what is required for the task.
 - If unrelated dead code is found, mention it, but do not delete it unless asked.
 - Remove imports, variables, functions, and types made unused **by your own changes**; leave pre-existing unused code alone.
 - **Documentation drift exception:** when a change makes a statement in `CLAUDE.md`, `.claude/rules/*.md`, or another repo doc describing the changed code outdated, update that doc in the same change without asking.
-- **`CLAUDE.md` has a size budget: hold it under 20 KB**, of which this layer's own text is about 13 KB - the project's own facts get the remaining 7. The file loads in full on every session and on every turn, so its cost is paid by every conversation whether or not the detail is relevant; on a small plan that is the whole point of this layer being light. Measure with `wc -c CLAUDE.md`, **not by line count**. When a section outgrows the budget, first delete what is true but dead - a status, an instruction for a change already applied, an alternative nothing uses - then move the *detail* into `.claude/rules/<name>.md` with a `paths:` frontmatter listing the globs it belongs to, and leave the rule plus a pointer here. **Prohibitions stay here**: a path-scoped rule fires only once a matching file is read, which is too late for "never create X".
+- **`CLAUDE.md` has a size budget: hold it under 20 KB**, of which this layer's own text is about 13 KB - the project's own facts get the remaining 7. The file loads in full on every session and on every turn, so its cost is paid by every conversation whether or not the detail is relevant; on a small plan that is the whole point of this layer being light. Measure with `wc -c CLAUDE.md`, **not by line count**. When a section outgrows the budget, first delete what is true but dead - a status, an instruction for a change already applied, an alternative nothing uses - then move the *detail* into `.claude/rules/<name>.md` with a `paths:` frontmatter listing the globs it belongs to - it loads by itself with those files, so no pointer stays here. **A prohibition that must be known before any file is read** (never create X, which tool to pick) **stays here** - a path-scoped rule fires only once a matching file is read; one about code in a file a rule covers lives in that rule alone.
 
 ### Version Control - Never Commit or Push
 
@@ -72,7 +72,7 @@ Every **non-trivial** task (feature, bug fix, refactor) runs these six steps. **
 
 **Skip steps 2, 4 and 5** for super-trivial edits (single-file, obvious, low-risk); "no subagents" skips the `hunt` and `drift` launches, and their obligations stay with the main thread - step 5 by `.claude/agents/drift.md`'s rules. Two rationalizations do not qualify: "single file, so trivial" - a single file with a consumer is a shared surface, grep first - and "obvious". **A skipped or unavailable step is named in the reply. A review that did not happen must never read like one that passed.**
 
-Skills, loaded when their moment comes and never recalled from memory: `debug` (a bug report), `handoff` (before a `/compact`, a new session, or a usage window running out), `retro` (only from its slash command - asked for one in prose, name `/retro` and stop), `maintain-ai-layer` (the layer's upkeep against the code: `weekly` routinely, `deep`, `rules` and `efficiency` only when the user asks), `setup` (this layer's own first-run fill).
+Skills, loaded when their moment comes and never recalled from memory: `debug` (a bug report), `handoff` (before a `/compact`, a new session, or a usage window running out), `retro` (only from its slash command - asked for one in prose, name `/retro` and stop), `maintain-ai-layer` (the layer's upkeep against the code: `weekly` routinely, `deep` and `rules` only when the user asks, `init` for the project sections, the rules and the unit tuning after an install).
 
 ## Architecture
 

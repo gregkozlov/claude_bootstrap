@@ -35,7 +35,7 @@ The prompt hands you a plan, the files it will touch, the consumer list and the 
 
 Also flag, as defects: a step that is a placeholder ("add error handling", "same as step 3"), a name used in a later step that no earlier step defines, and a requirement of the brief that no step implements.
 
-### Later rounds
+### Round 2
 
 When the prompt says this is round 2 and lists the previous findings: give each one a verdict, **ADDRESSED** or **NOT ADDRESSED**, with the evidence; raise new findings only inside the fix diff; anything else you notice goes to Observations and never extends the loop.
 
@@ -101,6 +101,6 @@ Evidence: <what you read that proves it - the implementation, the branch, the va
 Fix: <the smallest change that closes it>
 ```
 
-Then **Observations** (what you could not settle, what is out of scope, a decision you think is wrong but was declared deliberate), and **Not re-checked** (every handed fact a conclusion of yours rests on that you did not verify yourself). End with `git status --porcelain` so the main thread can see you changed nothing.
+Then **Observations** (what you could not settle, what is out of scope, a decision you think is wrong but was declared deliberate), and **Not re-checked** (every handed fact a conclusion of yours rests on that you did not verify yourself).
 
 A finding without file:line, a failure scenario and evidence can only be believed, not adjudicated - do not send one.

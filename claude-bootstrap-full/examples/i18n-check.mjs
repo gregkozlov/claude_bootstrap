@@ -1,5 +1,5 @@
 // Example from the example app (React + TypeScript + i18next, en / de). Depends on: translations in
-// public/locales/{en,de}/translation.json, the inline-fallback t('key', 'English') pattern; not copied by apply.mjs.
+// public/locales/{en,de}/translation.json, the inline-fallback t('key', 'English') pattern; not part of the template - copy it by hand.
 // Deterministic checks over public/locales/{en,de}/translation.json against src/ - the i18n agent's tool.
 //   node .claude/scripts/i18n-check.mjs            parity, keys referenced in code (a literal `t()` / `i18nKey` /
 //                                                  route `titleKey`) but missing from a file, and literal inline

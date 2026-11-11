@@ -1,10 +1,10 @@
-> Example from an inventory analytics frontend (`.claude/docs/decisions.md`). Not copied by apply.mjs - the template ships the empty skeleton. Shows what a filled file looks like: one bullet per entry, a bold lead with the verdict, the reason in a few sentences, identifiers instead of line numbers.
+> Example from an inventory analytics frontend (`.claude/docs/decisions.md`). Not part of the template, which ships the empty skeleton - copy what helps by hand. Shows what a filled file looks like: one bullet per entry, a bold lead with the verdict, the reason in a few sentences, identifiers instead of line numbers.
 
 # Decisions - do not re-file
 
 Decisions already taken about this codebase, each with its reason. A fresh review would otherwise rediscover them and raise them again.
 
-- **Who reads it.** `crosscheck` greps it by the diff's files and identifiers and hands the matching entries to every reviewer as settled. `drift`, `hunt` (in its `area` and `refute` modes) and `maintain-ai-layer` read it too.
+- **Who reads it.** `crosscheck` hands its path to every reviewer, who greps it by the diff's files and identifiers and treats a matching entry as settled. `drift`, `hunt` (in every mode) and `maintain-ai-layer` read it too.
 - **What a match means.** A finding that matches an entry is reported as `settled (decisions.md)`, not as a defect - unless it brings evidence the entry did not have, which reopens it.
 - **When an entry stops applying.** An entry describes code. When that code changes, the entry no longer binds and the finding is judged fresh.
 - **Not here.** What `CLAUDE.md` or a `.claude/rules/*.md` file already states, and open work: a live defect belongs in the backlog. A count, path or behaviour an entry cites is re-measured before it is relied on.
@@ -25,6 +25,8 @@ Product decisions - real, and deliberately not done.
   - orders are created one supplier at a time, and the `NewOrderDialog` flow already pre-fills the reorder quantities;
   - a CSV carries no unit of measure per line, so `5` of a `CS` item and `5` of an `EA` item would import identically;
   - `POST /orders` takes one order per call, so a partial import failure would leave half an upload behind with no rollback.
+- **`ReorderCalendar` keeps its deviations from the design.** Days outside the month are shown but disabled, and a week label is the real calendar week for the user's week start. Not built: the per-supplier colour band and an export on the day drawer. A review against the design reports none of these as a gap.
+- **`SupplierDetailPage` shows its unbacked controls disabled.** The payment-terms field and the Archive button wait for backend support; enabling one is a follow-up task, not a defect.
 
 ## Out of scope
 
@@ -47,6 +49,8 @@ Fixes someone will propose again, and claims someone will re-derive.
 - **`WarehouseMap` fits its bounds on first load only.** Refitting on every filter change throws away the user's zoom mid-analysis. The "Fit to warehouse" button is the explicit way back.
 - **A purchase-order quantity accepts decimals.** Items sold by weight (`KG`) take fractional quantities. The `NumberInput` step comes from the line's unit of measure, so an integer-only field was rejected.
 - **No retry on `POST /orders`.** The endpoint is not idempotent, and a retried timeout can create two orders. Mutations keep TanStack Query's default of no retry; the error toast tells the user to check the order list first.
+- **No guard for a create echo without an id after `usePostOrders`.** `POST /orders` always echoes the new order with its id (measured), so the guard would handle a case the flow cannot produce.
+- **The console error `<path> attribute d: Expected number` during a `LeadTimeChart` resize is not fixed.** An upstream bug in the chart library's path animation; cosmetic, the end state is correct. Rejected: patching the package (breaks on every upgrade), turning animation off (overrides the user's reduce-motion setting). Re-open only after a chart-library upgrade.
 - **A reordered import in a touched file is not noise to revert.** `lint-staged` runs `prettier --write` with the import-sorting plugin on every staged file, so the new order is what the repo's own tooling produces.
 
 ## Verified clean

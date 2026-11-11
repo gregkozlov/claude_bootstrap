@@ -14,11 +14,11 @@ The units are:
 - each `.claude/docs/*.md`;
 - every tracked README under `<SRC_DIR>/`.
 
-Run one `drift` in `section` mode per unit, in waves of **eight in parallel**. Each prompt asks for the non-`holds` entries plus the tally only, and carries this run's decisions so far. Between waves, check and apply the returned pairs, so that the next wave reads the corrected text.
+Run one `drift` in `section` mode per unit, in waves of **eight in parallel**. Each run lists only the claims that need action, and each prompt carries this run's decisions so far. Between waves, check and apply the returned pairs, so that the next wave reads the corrected text.
 
 ## D2. Rules
 
-Run `references/rules.md`: R1's inventory (weekly steps 1-2 already ran); R2's two decisions - a rule whose subject is gone, a rule that restates another - on D1's results for the rule files; then R3-R5 - reach both ways with the loader probe, the split, and the rules the code needs. A layer with no project rule runs R7 instead of R2-R5. Record the `rules-reach` median, top-decile, max and "files over 30 KB" before and after.
+Run `references/rules.md`: R1's inventory (weekly steps 1-2 already ran); R2's two decisions - a rule whose subject is gone, a rule that restates another - on D1's results for the rule files; then R3-R5 - reach both ways, the split, and the rules the code needs. A layer with no project rule runs R7 instead of R2-R5. Record the `rules-reach` median, top-decile, max and "files over 30 KB" before and after.
 
 ## D3. Cross-file consistency
 
@@ -39,11 +39,12 @@ The memory folder is the one Claude Code keeps for this project: `~/.claude/proj
 
 - Run `node <root>/.claude/skills/maintain-ai-layer/layer-refs.mjs <memory folder>`.
 - Check that `MEMORY.md` lists every file in the folder once, and that every line points to an existing file. Fix the index directly.
+- Memory holds machine-specific, personal and cross-repo facts only. A memory that duplicates the layer is proposed for deletion; one that carries project knowledge is proposed for a move - a decision to `.claude/docs/decisions.md`, a mechanic to the rule or skill that reaches its code.
 - For each memory whose fact the code or the layer now contradicts (a named file or flag gone, a decision `CLAUDE.md` reversed, a duplicate of a layer rule), write one line in the report: the file, the contradiction, and the proposed action (update or delete). Change nothing until the owner confirms.
 
 ## D6. Workflow walk
 
-A `drift` run checks one unit, so a break at the seam between two steps passes every run. This step walks whole tasks through the lifecycle. Launch two `general-purpose` agents in parallel, read-only: they may run `grep`, `ls` and `git log`, and they never edit or write a file. Each one reads the `CLAUDE.md` "Version Control", "Shell and file edits" and "Development Workflow" sections, the `lifecycle`, `crosscheck`, `debug`, `verify-live` and `precompact` skills, every `.claude/agents/*.md`, `.claude/rules/session-artifacts.md`, `.claude/hooks/README.md`, the hook files, the `hooks` block of `.claude/settings.json`, and the Stop-gate block `.claude/settings.local.example.json` gives. They do not read any session folder.
+A `drift` run checks one unit, so a break at the seam between two steps passes every run. This step walks whole tasks through the lifecycle. Launch two `general-purpose` agents in parallel, read-only: they may run `grep`, `ls` and `git log`, and they never edit or write a file. Each one reads the `CLAUDE.md` "Version Control", "Shell and file edits" and "Development Workflow" sections, the `lifecycle`, `crosscheck`, `debug`, `verify-live` and `precompact` skills, every `.claude/agents/*.md`, `.claude/hooks/README.md`, the hook files and the `hooks` block of `.claude/settings.json`. They do not read any session folder.
 
 - (a) walks a **bounded** fix, and then the same fix as **super-trivial** and under "no subagents";
 - (b) walks an **architectural** change through plan mode, and a **bug report** through `debug`.
@@ -54,7 +55,7 @@ At every step, the agent checks:
 - **Outputs:** what the step hands on, and who consumes it.
 - **Agent prompts:** what the step says to put in an agent's prompt, against what that agent's body demands, its `tools:` and its modes.
 - **The session folder:** what gets written there, and by whom.
-- **Hooks:** what a hook does at that point (`guard`, `record-activity`, `verify-gate`, `compact-pointer`, `gate-registered`, `record-loads`), against what the step expects.
+- **Hooks:** what a hook does at that point (`guard`, `stop-check`, `compact-pointer`, `upkeep-nudge`), against what the step expects.
 - **Skip and re-entry:** whether those rules agree across files.
 
 Each agent returns only the breaks. A break is a step that cannot run as written, an input nothing produces, or two files that disagree. Each break comes with the scenario, the step, and both texts quoted verbatim. The fix is either an exact `replace:` / `with:` pair or "design question for the owner". A contradiction with one plainly right side is applied under the standing rules. A process gap, such as a missing step, a reorder, or a defect that passes every reviewer, goes to the report as a proposal, because the shape of the process is the owner's call. A break in hook code or settings goes to the report only.

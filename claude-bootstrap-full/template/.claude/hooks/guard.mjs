@@ -6,13 +6,12 @@
 //                       or writes a file (`git grep -O<cmd>`, `--output=<file>`), a `gh` call that writes, a shell
 //                       write or in-place edit into the project, a copy or move whose target is inside the
 //                       project, a delete beyond the one grant (one non-recursive project path per call, never a
-//                       protected path, `.git`, the hooks, the settings or a session ledger), and a `cd` that
-//                       moves the working directory for every later call. A Bash variable a leading statement
-//                       sets to a literal (`S="<path>"; cp a "$S/b"`) is judged as that literal.
+//                       protected path, `.git`, the hooks or the settings), and a `cd` that moves the working
+//                       directory for every later call. A Bash variable a leading statement sets to a literal
+//                       (`S="<path>"; cp a "$S/b"`) is judged as that literal.
 //   Edit / Write      - a path matching PROTECTED_PATHS (generated or externally owned files), any written line
-//                       carrying a dash character, for an agent in FENCED_AGENTS (`hunt` / `integration`) any
-//                       project path but the ones its entry allows, and a `.claude/sessions/*/agents.md` that
-//                       record-activity.mjs keeps (`Write` always, `Edit` until the hook has created it).
+//                       carrying a dash character, and for an agent in FENCED_AGENTS (`hunt`) any project path
+//                       but the ones its entry allows.
 // Registered in .claude/settings.json (tracked) - it is repo policy, like the deny list beside it.
 // Reads one JSON payload on stdin; exit 2 with the reason on stderr blocks the call, exit 0 allows it.
 // A guard that cannot parse its input allows the call: the deny list and the rules still stand behind it.
@@ -22,9 +21,14 @@ import path from 'node:path';
 
 // Paths the agent must never hand-edit, as regex sources tested against the tool's file_path with every
 // backslash turned into "/" first - write them with forward slashes, matching the path's tail, e.g.
-// "src/api/generated/", "\\.openapi\\.json$". Empty means nothing is protected. Filled by apply.mjs from
-// GENERATED_PATHS as a JSON array inside the raw string; edit freely afterwards.
-const PROTECTED_PATHS = JSON.parse(String.raw`<GENERATED_PATHS>` || '[]').map((source) => new RegExp(source));
+// ["src/api/generated/", "\\.openapi\\.json$"]. An empty list protects nothing. Filled at install as a JSON array
+// inside the raw string (INSTALL.md); edit freely afterwards. The unfilled placeholder and an empty string read as
+// an empty list, so a missed fill leaves every other check working; anything else is parsed for real, so a misfill
+// (a bare string, a broken array) throws rather than silently protecting nothing - and a hook that throws allows
+// every call, so run the self-tests after filling it.
+const PROTECTED_RAW = String.raw`<GENERATED_PATHS>`;
+const PROTECTED_SOURCES = PROTECTED_RAW.startsWith('<') || !PROTECTED_RAW.trim() ? [] : JSON.parse(PROTECTED_RAW);
+const PROTECTED_PATHS = PROTECTED_SOURCES.map((source) => new RegExp(source));
 
 // `stash` is not here: it is judged by an allow list in gitCallWrites.
 const GIT_WRITE_VERBS = new Set([
@@ -88,7 +92,6 @@ const MOVER_EXEMPT = new RegExp(
 );
 const NODE_MODULES = /(?:^|[\\/])node_modules(?:[\\/]|$)/;
 const PROBE_PATH = new RegExp(String.raw`^${SRC_RE}\/__hunt_probe[^/]*\.ts$`);
-const AGENTS_LEDGER = /^\.claude\/sessions\/[^/]+\/agents\.md$/i;
 // The delete grant: a file the change itself orphaned may be deleted from the shell, one path per call, with no
 // recursive flag, and never inside `.git`, the hooks or the settings files (SHELL_PROTECTED) or a PROTECTED_PATHS match.
 const DELETER = /^(?:rm|del|erase|ri|rd|rmdir|Remove-Item|unlink)$/i;
@@ -130,10 +133,7 @@ const DASH = new RegExp(
 // A project's own writer agent with a narrow job gets an entry of its own (`allowed` is tested against the
 // project-relative path with forward slashes, `what` names it in the refusal).
 const PROBE_FENCE = { allowed: PROBE_PATH, what: 'its compile probe (<SRC_DIR>/__hunt_probe*.ts)' };
-const FENCED_AGENTS = new Map([
-  ['hunt', PROBE_FENCE],
-  ['integration', PROBE_FENCE],
-]);
+const FENCED_AGENTS = new Map([['hunt', PROBE_FENCE]]);
 const MAX_BODY_DEPTH = 3;
 
 async function readStdin() {
@@ -614,10 +614,6 @@ function checkMovers(segment, context) {
     if (/^(?:del|erase)$/i.test(verb) && (/[\\/]$/.test(target) || isDirectory(target, context.cwd))) {
       deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" on the directory "${target}" deletes every file in it. CLAUDE.md, Shell and file edits: an orphaned file is deleted one path at a time.`);
     }
-    // Deleting the ledger wipes the verdicts; the hook rebuilds only the rows.
-    if (DELETER.test(verb) && agentsLedgerPath(target, context.cwd)) {
-      deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" on "${target}" deletes the rows record-activity.mjs appended to the session ledger. CLAUDE.md, Development Workflow: the hook keeps the rows; a verdict goes in with Edit.`);
-    }
     // The one shell operation on a project file that is granted: a single non-recursive delete of an unprotected path.
     if (DELETER.test(verb) && !recursive && !isProtected(normal) && !GIT_DIR.test(normal) && !SHELL_PROTECTED.test(normal)) {
       continue;
@@ -977,19 +973,6 @@ function isScratchTarget(target) {
   return isOutsideProject(normal);
 }
 
-function agentsLedgerPath(target, cwd) {
-  const relative = path.relative(projectRoot(cwd), path.resolve(cwd || process.cwd(), nativePath(target))).replace(/\\/g, '/');
-  return AGENTS_LEDGER.test(relative);
-}
-
-function fileExists(target, cwd) {
-  try {
-    return statSync(path.resolve(cwd || process.cwd(), nativePath(target))).isFile();
-  } catch {
-    return false;
-  }
-}
-
 function checkWrite(input, context) {
   const filePath = input.file_path;
   if (typeof filePath !== 'string') return;
@@ -999,11 +982,6 @@ function checkWrite(input, context) {
   if (!insideProject(filePath, context.cwd)) return;
   if (context.fence && !fencedPath(filePath, context.cwd, context.fence.allowed)) {
     deny(`Blocked by .claude/hooks/guard.mjs: ${context.fence.agent} may write only ${context.fence.what} inside the project, not ${filePath}.`);
-  }
-  // record-activity.mjs creates the ledger, backfilled with the launches made before the folder existed, and appends
-  // every later row: a Write would wipe them, and a ledger any tool creates first stops the backfill.
-  if (agentsLedgerPath(filePath, context.cwd) && (context.shell === 'Write' || !fileExists(filePath, context.cwd))) {
-    deny(`Blocked by .claude/hooks/guard.mjs: ${filePath} is created and kept by record-activity.mjs - a Write would wipe or pre-empt its rows, and an Edit may only add a verdict once the hook has created it. CLAUDE.md, Development Workflow: the hook keeps the rows; a verdict goes in with Edit.`);
   }
   const texts = [];
   if (typeof input.content === 'string') texts.push(input.content);

@@ -13,41 +13,6 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Recording the edit"
-          }
-        ]
-      },
-      {
-        "matcher": "mcp__claude-in-chrome__navigate",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Recording the browser check"
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Recording the agent launch"
-          }
-        ]
-      }
-    ],
     "PreCompact": [
       {
         "matcher": "",
@@ -76,13 +41,13 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-registered.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Checking that this tree has a verification gate"
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-check.mjs\"",
+            "timeout": 30,
+            "statusMessage": "Recording the session's start state"
           }
         ]
       },
@@ -109,25 +74,14 @@
         ]
       }
     ],
-    "SubagentStop": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-activity.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Recording the agent run"
-          }
-        ]
-      }
-    ],
-    "InstructionsLoaded": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/record-loads.mjs\"",
-            "timeout": 10
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-check.mjs\"",
+            "timeout": 180,
+            "statusMessage": "Checking the files changed this session"
           }
         ]
       }
@@ -210,7 +164,7 @@
       "Bash(<CHECK_COMMAND>)",
       "Bash(node .claude/scripts/rules-reach.mjs)",
       "Bash(node .claude/scripts/rules-reach.mjs --check)",
-      "Bash(node .claude/scripts/rules-reach.mjs --loads:*)",
+      "Bash(node .claude/scripts/rules-reach.mjs --files:*)",
       "Bash(node .claude/scripts/dev-servers.mjs)",
       "Bash(node .claude/scripts/run-pure.mjs:*)",
       "Bash(git status:*)",
@@ -220,11 +174,10 @@
       "Bash(npx tsc -p * --noEmit --tsBuildInfoFile *)",
       "Bash(rm <SRC_DIR>/__hunt_probe.ts)",
       "Bash(rm <SRC_DIR>/__hunt_probe2.ts)",
-      "Bash(rm <SRC_DIR>/__hunt_probe_integration.ts)",
       "PowerShell(<CHECK_COMMAND>)",
       "PowerShell(node .claude/scripts/rules-reach.mjs)",
       "PowerShell(node .claude/scripts/rules-reach.mjs --check)",
-      "PowerShell(node .claude/scripts/rules-reach.mjs --loads:*)",
+      "PowerShell(node .claude/scripts/rules-reach.mjs --files:*)",
       "PowerShell(node .claude/scripts/dev-servers.mjs)",
       "PowerShell(node .claude/scripts/run-pure.mjs:*)",
       "PowerShell(git status:*)",
@@ -233,8 +186,7 @@
       "PowerShell(git show:*)",
       "PowerShell(npx tsc -p * --noEmit --tsBuildInfoFile *)",
       "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe.ts)",
-      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe2.ts)",
-      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe_integration.ts)"
+      "PowerShell(Remove-Item <SRC_DIR>/__hunt_probe2.ts)"
     ]
   }
 }

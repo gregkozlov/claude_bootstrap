@@ -14,11 +14,11 @@ Two hooks, both registered in `.claude/settings.json` (tracked - repo policy, li
 
 **Edit / Write / MultiEdit**
 
-- A `file_path` matching `PROTECTED_PATHS` (top of `guard.mjs`): the generated and externally owned files, filled by the `setup` skill. Before it runs, the unfilled placeholder reads as an empty list and protects nothing - the other checks still work.
+- A `file_path` matching `PROTECTED_PATHS` (top of `guard.mjs`): the generated and externally owned files, filled at install (`INSTALL.md`). A placeholder left unfilled reads as an empty list and protects nothing - the other checks still work.
 - Any written line carrying an em dash, en dash or their relatives (`DASH`).
 - Files outside the project are never checked: a scratchpad script or a memory file may contain anything.
 
-Two checks are kept only so the file stays diffable against the full one: the session-ledger rule is inert (no hook writes a ledger), and the write fence that keeps `hunt` / `integration` to their compile probe (`FENCED_AGENTS`) only narrows `hunt`'s Bash movers, since `hunt` has no Edit or Write here - the probe path it allows has no use in this layer.
+One check is kept only so the file stays diffable against the full one: the write fence that keeps `hunt` to its compile probe (`FENCED_AGENTS`) only narrows `hunt`'s Bash movers, since `hunt` has no Edit or Write here - the probe path it allows has no use in this layer.
 
 ## Self-test
 
@@ -26,7 +26,7 @@ Two checks are kept only so the file stays diffable against the full one: the se
 node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs
 ```
 
-Every line must read `ok`. **The shell suite needs the source-directory placeholder filled first** (the `setup` skill does it): it builds its paths from that value, and an unfilled `<...>` reads as a redirect, so an unfilled copy fails the cases built from it, with nothing wrong with them. `guard-test.mjs` is meaningful from the first minute: its only placeholder paths are the fence cases, and the unfilled guard carries the same placeholder, so they still match. Once `setup` fills the source directory in `guard.mjs`, it fills those two cases too, or the probe case fails. The suites cover the git verbs behind `-C` / `-c`, `git stash`, read git that runs or writes, interpreter one-liners, `gh`, leading-literal variables, `sed -i`, heredocs and `tee` by target, a copier's source versus its destination, the delete grant and its cap, `cd` outside a subshell, a comment hiding a later line, and dashes in `Edit` / `Write` / `MultiEdit`. Add one case per entry in `PROTECTED_PATHS` - `guard-test.mjs` carries two commented lines showing the shape.
+Every line must read `ok`. **The shell suite needs the source-directory placeholder filled first** (the install does it): it builds its paths from that value, and an unfilled `<...>` reads as a redirect, so an unfilled copy fails the cases built from it, with nothing wrong with them. `guard-test.mjs` is meaningful from the first minute: its only placeholder paths are the fence cases, and the unfilled guard carries the same placeholder, so they still match. Once the source directory is filled in `guard.mjs`, it is filled in those cases too, or the probe case fails. The suites cover the git verbs behind `-C` / `-c`, `git stash`, read git that runs or writes, interpreter one-liners, `gh`, leading-literal variables, `sed -i`, heredocs and `tee` by target, a copier's source versus its destination, the delete grant and its cap, `cd` outside a subshell, a comment hiding a later line, and dashes in `Edit` / `Write` / `MultiEdit`. Add one case per entry in `PROTECTED_PATHS` - `guard-test.mjs` carries two commented lines showing the shape.
 
 Run them after every change to `guard.mjs` or to `PROTECTED_PATHS`. A regex that does not compile takes the whole hook down, and a hook that crashes lets every call through.
 
@@ -40,4 +40,4 @@ A new rule goes in with a test case in the same change. The guard is regex over 
 
 ## upkeep-nudge.mjs - the upkeep reminder
 
-Registered as `SessionStart` (startup, clear). Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer` and by `setup`) and, when it is 14 days old or more, more than a day ahead, missing or unreadable, hands the model a line telling it to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file), since the pass runs in the main tree. It reports and never blocks, and costs tokens only on the day it speaks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`, every line `ok`.
+Registered as `SessionStart` (startup, clear). Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer`, its `init` run included) and, when it is 14 days old or more, more than a day ahead, missing or unreadable, hands the model a line telling it to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file), since the pass runs in the main tree. It reports and never blocks, and costs tokens only on the day it speaks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`, every line `ok`.

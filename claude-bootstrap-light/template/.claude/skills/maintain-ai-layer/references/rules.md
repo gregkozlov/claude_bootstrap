@@ -2,14 +2,14 @@
 
 The rule set, and nothing else in the layer: every rule checked against the code, each `paths:` matched to the files its text needs (over-reach and under-reach), a rule whose sections serve different files split, and the rules the code needs and no layer file states added. With no project rule at all - the state right after the install, which ships none - R7 builds the set from the whole project. `deep` runs R1's inventory, R2's two decisions and R3-R5 as its D2, or R7 when there is no project rule.
 
-The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "Measuring a rule" says; this layer has no reach checker, no fixture and no load log, so a rule's reach is proved by that measurement alone, before and after every change.
+The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "Measuring a rule" says; this layer has no reach checker, so a rule's reach is proved by that measurement alone, before and after every change.
 
 ## Writing a rule
 
 - The file is `.claude/rules/<subject>.md`, opening with a `paths:` frontmatter in block form - one glob per line, each a single-quoted item (`  - 'src/**/*.tsx'`). A flow list, a string or a misspelled key makes the loader read no globs, and the rule then loads in every session.
 - **Point the globs at the files whose writing the text changes**, not at everything it governs: a rule about a query cache belongs on the files that call queries. Narrow by pattern (`.tsx` only, `index.tsx` only, a folder the text is about), never by listing today's folder names - the next module with the same shape is the file such a list misses. Reach is paid in bytes on every matching Read, under-reach in defects.
-- **A prohibition stays in `CLAUDE.md`**: a rule fires only once a matching file is read, which is too late for "never create X". Text one process step needs goes into that step's skill.
-- `CLAUDE.md` gets a one-line pointer naming the rule and when it loads, within its 20 KB budget.
+- **A prohibition that must be known before any file is read stays in `CLAUDE.md`**: a rule fires only once a matching file is read, which is too late for "never create X". A prohibition about code in the files a rule covers lives in that rule alone. Text one process step needs goes into that step's skill.
+- A rule needs no pointer in `CLAUDE.md`: it loads by itself with its files. Its budget is 20 KiB, by `wc -c` of the LF text.
 - A count or a site list rots - write the grep that finds the sites.
 
 ## R1. Baseline
@@ -20,9 +20,9 @@ The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "
 
 ## R2. Against the code
 
-One `drift` in `section` mode per rule file, in waves of eight in parallel (non-`holds` entries and the tally only; `references/settled.md` and this run's decisions in every prompt; the pairs applied between waves). Then:
+One `drift` in `section` mode per rule file, in waves of eight in parallel (the claims that need action only; `references/settled.md` and this run's decisions in every prompt; the pairs applied between waves). Then:
 
-- **A rule whose subject is gone** - every component, helper, path and identifier it is about deleted from the code (`git log --diff-filter=D` finds where it went) - is deleted, with its `CLAUDE.md` pointer and every reference `layer-refs` then reports. A rule with part of its subject gone loses those sections only.
+- **A rule whose subject is gone** - every component, helper, path and identifier it is about deleted from the code (`git log --diff-filter=D` finds where it went) - is deleted, with every reference `layer-refs` then reports. A rule with part of its subject gone loses those sections only.
 - **A rule that restates `CLAUDE.md` or another rule** keeps one copy, chosen by the "where text lives" standing rule.
 
 ## R3. Reach, both ways
@@ -42,7 +42,7 @@ Apply each fix after measuring it yourself. A section that serves a strict subse
 - **Sections with a different audience** (R3's section map) move to a rule whose globs fit them: an existing one, or a split. The usual shape is `<name>.md` for the call sites and `<name>-internals.md` for the component's own folder. A split is made only when R3's map names files that stop loading the moved text, and the reach after it must show that.
 - **One audience, still heavy** - trim instead: true-but-dead text, a mechanic only one process step needs (to that step's skill), a second copy.
 - **The floor:** a rule that would end under ~1 KB is merged into the rule whose globs it shares.
-- A new file gets its `CLAUDE.md` pointer within budget, and the pointers to the old file are re-aimed (`grep -rn "<rule>.md" CLAUDE.md .claude`).
+- The pointers to the old file are re-aimed (`grep -rn "<rule>.md" CLAUDE.md .claude`).
 
 A candidate `references/settled.md` already answered is logged as settled.
 
@@ -62,7 +62,7 @@ Each prompt lists the layer files and asks for:
 2. A competent newcomer would get it wrong.
 3. Neither the type checker nor the linter catches it: an enforced rule teaches itself through its error.
 4. No layer file says it - `CLAUDE.md`, a rule, an agent, a skill - and `references/settled.md` did not reject it.
-5. **An audience:** the files it binds fit a glob narrower than the tree. A prohibition every session needs goes into `CLAUDE.md` within its budget instead; nothing becomes a rule without `paths:`.
+5. **An audience:** the files it binds fit a glob narrower than the tree. A prohibition that must be known before any file is read goes into `CLAUDE.md` within its budget instead; nothing becomes a rule without `paths:`.
 
 It lands as a line or a paragraph in the rule whose `paths:` reach those files, and a new file only when no rule reaches them or the reaching rule's audience is much wider than the text needs - by "Writing a rule". Policy breaks go through the "code is not the doc's servant" standing rule. Each rejected candidate is logged with the condition it failed.
 
@@ -73,7 +73,7 @@ The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c C
 ## R7. No project rule: build the set
 
 1. **Survey.** `git ls-files` per top-level folder with counts, the stack from the package manifest, and the `CLAUDE.md` sections. Cut the code into areas of at most ~250 source files (a large folder by its subfolders), plus one for the root config files.
-2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, not a prohibition) is a candidate too: it moves into the rule, and a pointer stays - the move that keeps `CLAUDE.md` inside its budget.
+2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind - the move that keeps `CLAUDE.md` inside its budget.
 3. **Filter** by R5's five conditions.
 4. **Cluster by audience:** one rule per set of files that needs the same text, named by its subject; R4's floor and split shape hold from the first draft.
 5. **Write** each rule by "Writing a rule", and measure its reach.

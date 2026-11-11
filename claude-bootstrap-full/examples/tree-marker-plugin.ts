@@ -1,5 +1,5 @@
 // Example from a Vite project (vite.config.ts). Depends on: Vite (any version with configureServer),
-// git on PATH. Not copied by apply.mjs - paste the plugin into the project's vite.config.ts and add it
+// git on PATH. Not part of the template - paste the plugin by hand into the project's vite.config.ts and add it
 // to `plugins`. For another dev server, expose the same JSON at <DEV_BASE_PATH>__tree.
 //
 // Dev-only marker at <base>__tree: which machine, tree and branch this server serves. Two trees share

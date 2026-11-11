@@ -30,8 +30,8 @@ Settled user decisions are context, not mistakes - do not relitigate them.
 Fix each at the cheapest layer that would have caught it, in this order of preference:
 
 1. a tool that fails - a lint rule, a check script, a `guard` check;
-2. a prohibition in `CLAUDE.md` (mind its 20 KB budget);
-3. detail in a path-scoped `.claude/rules/*.md` that loads on the code;
+2. one line in a path-scoped `.claude/rules/*.md` that loads on the code, for a defect class a user can hit in ordinary work;
+3. a prohibition in `CLAUDE.md` - only one that must be known before any file is read (mind its 20 KB budget);
 4. a new attack angle in `.claude/agents/hunt.md`, or a step in a skill;
 5. a memory entry - for a habit with no file to change.
 
@@ -41,4 +41,4 @@ Numbered list, each entry: **the problem** in one line, **the proposal** (what, 
 
 ## 4. After the answer
 
-Apply the chosen items through the normal lifecycle - the change's class decides the steps, and a `CLAUDE.md` or `.claude/` change still gets step 5's docs check. A habit goes into memory as a `feedback` entry.
+Apply the chosen items through the normal lifecycle - the change's class decides the steps. A habit goes into memory as a `feedback` entry.

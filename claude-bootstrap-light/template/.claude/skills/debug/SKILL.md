@@ -28,7 +28,7 @@ Follow the value from its source to what the user saw, and find the **first** bo
 
 1. **Input** - the request, the file, the arguments that actually left: the right ids, the right period, the right enum vocabulary, nothing the caller set silently dropped.
 2. **Response or read** - the body or the row as returned: the field, its scale (0-1 or percent), `null` where a number was expected, an array shorter than the count above it.
-3. **Derivation** - the helper, the selector, the formatter, the comparator: **run the pure part** on the observed input rather than reasoning about it, and read the installed library implementation where its behaviour decides the outcome - never the prop name.
+3. **Derivation** - the helper, the selector, the formatter, the comparator: **run the pure part** on the observed input rather than reasoning about it - when the cause sits there, that run on that input is the proof repeated after the fix (phase 4) - and read the installed library implementation where its behaviour decides the outcome - never the prop name.
 4. **Output** - the rendered element, the log line, the written file: which state branch was actually taken (loading, empty, error, data).
 
 Two facts per boundary: expected and observed. The divergence sits at exactly one of them; everything downstream is a consequence, not a cause.
@@ -50,6 +50,7 @@ If two hypotheses survive, do not fix both: design the one observation that sepa
 
 The smallest change at the cause, not at the symptom. Say the class, then run the lifecycle from step 2 in `CLAUDE.md`. This skill adds:
 
+- **The proof is the reproduction, before and after.** The pure-part run on the observed input (phase 2, Derivation) or the reproduction of phase 1 shows the wrong value before the fix and the right one after it; both outputs are named in the reply. A run that does not show the wrong value before the fix means the cause is named wrong - back to phase 3, no fix.
 - **The reproduction from phase 1 is re-run**, and its outcome stated with the observed value, not "works now".
 - **A second fix that does not close the reproduction stops the work.** Two failed fixes mean the cause is not what was named; report both attempts and the pattern they share, and the third attempt is the user's call - it is usually a wrong model of the code, not a wrong line.
 

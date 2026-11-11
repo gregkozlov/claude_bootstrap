@@ -8,8 +8,7 @@ Run these, and copy the numbers into the task file:
 git -C <root> branch --show-current && git -C <root> log --oneline -1 && git -C <root> status --short
 wc -c <root>/CLAUDE.md
 node <root>/.claude/scripts/rules-reach.mjs             # weight report: per-file rule text, per-rule reach, globs matching nothing
-node <root>/.claude/scripts/rules-reach.mjs --check     # fixture + glob shape
-node <root>/.claude/scripts/rules-reach.mjs --loads     # every rule load of the last 15 days against the model
+node <root>/.claude/scripts/rules-reach.mjs --check     # glob shape + the 20 KiB per-rule budget
 node <root>/.claude/skills/maintain-ai-layer/layer-refs.mjs   # dead paths, package scripts, skill and agent names in every tracked *.md
 git -C <root> log --since=14.days --name-only --format= -- <SRC_DIR> | sort | uniq -c | sort -rn | head -40
 ```
@@ -17,8 +16,7 @@ git -C <root> log --since=14.days --name-only --format= -- <SRC_DIR> | sort | un
 ## 2. Mechanical fixes
 
 - **`layer-refs` hits.** Find where each dead reference went (`git log --diff-filter=R --name-status -- <old path>`, or grep the identifier) and correct it. A path or `npm run` command that is deliberately named as something that must not exist or is not tracked (a forbidden folder, a refused command form, a gitignored hand-copy, a placeholder in an example) is not stale. Leave it, and note it once in the task file.
-- **`rules-reach` problems.** Fix every `SHAPE` line, every `FAIL` and `WARN` from `--check`, and every "Globs matching nothing" cell. For such a glob, find where its code went, and point the glob there or drop it. A rule left with no glob at all is merged into a neighbour or deleted.
-- **`--loads` findings.** A `PARSER`, `REACH` or `ALWAYS` line is the real loader disagreeing with `rules-reach.mjs`: fix the script and `.claude/rules/rules-reach.md` against it. A missing-field `FAIL` means a payload field was renamed: read one record and fix the names `rules-reach.mjs` reads; a renamed `load_reason` also goes to the report, since `record-loads.mjs` prunes on it and this skill never edits a hook. An empty log in this tree means `record-loads.mjs` is not firing. "No rule load left to check" means nothing was verified: every load predates a rule edit, or no rule was read since - say so in the report, not as a pass.
+- **`rules-reach` problems.** Fix every `SHAPE` line and every "Globs matching nothing" cell. For such a glob, find where its code went, and point the glob there or drop it. A rule left with no glob at all is merged into a neighbour or deleted. A `FAIL` from `--check` is a rule over the budget: trim it by class (`references/rules.md` R4).
 
 ## 3. Counts
 
@@ -26,7 +24,7 @@ Launch one `Explore` agent ("very thorough", read-only) on `CLAUDE.md` and `.cla
 
 ## 4. Hotspot drift
 
-Match the step 1 `git log` file list against each rule's globs (the `rules-reach` report shows reach per rule). Take the **three rules** that the most changed files reached. Then take the **`CLAUDE.md` sections** that describe the same areas, at most two. Launch the `drift` agent in `section <name>` mode on each, all in parallel. Tell each run to print only the non-`holds` entries and the tally.
+Match the step 1 `git log` file list against each rule's globs (the `rules-reach` report shows reach per rule). Take the **three rules** that the most changed files reached. Then take the **`CLAUDE.md` sections** that describe the same areas, at most two. Launch the `drift` agent in `section <name>` mode on each, all in parallel. Each run lists only the claims that need action.
 
 ## 5. Rule loading
 
@@ -34,7 +32,7 @@ From the `rules-reach` report:
 
 - **Heavy files.** Take the three files with the most rule text. For each rule loaded there, read its `##` headings and decide whether the file needs that text. When a whole rule is irrelevant to a glob's files, narrow the glob. When only one section is irrelevant, move that section to the rule whose globs fit it. After the change, `--check` must pass.
 - **Always-on text.** Rules without `paths:` are already `SHAPE` lines. Also measure the frontmatter `description` of every agent and of every skill without `disable-model-invocation: true`, because those load in every session and in every agent list: `grep -h "^description:" $(grep -L "^disable-model-invocation: true" .claude/skills/*/SKILL.md) .claude/agents/*.md | awk '{print length}'`. A description over ~400 characters is trimmed to its trigger phrases.
-- **`CLAUDE.md` text that only one area needs** (a mechanic, not a prohibition) becomes a pointer, and the detail moves to the rule that loads with that area.
+- **`CLAUDE.md` text that only one area needs** - a mechanic, or a prohibition about code in files a rule covers - moves to the rule that loads with that area, with no pointer left behind; a prohibition that must be known before any file is read stays.
 
 ## 6. CLAUDE.md, agents, skills
 

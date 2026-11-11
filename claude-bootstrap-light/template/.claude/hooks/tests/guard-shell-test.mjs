@@ -87,7 +87,6 @@ const cases = [
   ['rm a hook (deny)', 2, 'rm .claude/hooks/guard.mjs'],
   ['rm a settings file (deny)', 2, 'rm .claude/settings.json'],
   ['rm inside .git (deny)', 2, 'rm .git/config'],
-  ['rm a session ledger (deny)', 2, 'rm .claude/sessions/1999-01-01T00-00-guardtst/agents.md'],
   ['unlink a single orphaned file (allow)', 0, 'unlink <SRC_DIR>/a.ts'],
   ['Remove-Item a single file (allow, PowerShell)', 0, 'Remove-Item <SRC_DIR>/a.ts'],
   ['Remove-Item a comma list (deny, PowerShell)', 2, 'Remove-Item <SRC_DIR>/a.ts,<SRC_DIR>/b.ts'],

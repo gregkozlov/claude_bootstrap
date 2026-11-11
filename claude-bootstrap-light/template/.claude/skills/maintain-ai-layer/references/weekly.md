@@ -22,11 +22,11 @@ git log --since=30.days --name-only --format= | sort | uniq -c | sort -rn | head
 
 ## 3. Hotspot fact-check
 
-Match the step 1 file list against each rule's reach and against the `CLAUDE.md` sections that describe the same areas. Take **the two rules and the one `CLAUDE.md` section** the most changed files reached, and launch `drift` in `section <name>` mode on each, in parallel - each prompt naming its section, asking for the non-`holds` entries and the tally only, and carrying the decisions this run already took and `references/settled.md`. Apply each replacement your own command confirms; an `unverifiable` claim goes to the report as unverified, a `code-violates-policy` one as a code finding.
+Match the step 1 file list against each rule's reach and against the `CLAUDE.md` sections that describe the same areas. Take **the two rules and the one `CLAUDE.md` section** the most changed files reached, and launch `drift` in `section <name>` mode on each, in parallel - each prompt naming its section, asking for only the claims that need action, and carrying the decisions this run already took and `references/settled.md`. Apply each replacement your own command confirms; an `unverifiable` claim goes to the report as unverified, a `code-violates-policy` one as a code finding.
 
 ## 4. Always-on text
 
-- **`CLAUDE.md`:** delete text that is true but dead - a status, an instruction for a change already applied, an alternative nothing uses, a paragraph a rule already says. Text only one area needs (a mechanic, not a prohibition) moves to the rule that loads with that area, leaving a pointer.
+- **`CLAUDE.md`:** delete text that is true but dead - a status, an instruction for a change already applied, an alternative nothing uses, a paragraph a rule already says. Text only one area needs - a mechanic, or a prohibition about code in files a rule covers - moves to the rule that loads with that area, with no pointer left behind; a prohibition that must be known before any file is read stays.
 - **Descriptions:** every agent description and every skill description without `disable-model-invocation: true` loads in every session: `grep -h "^description:" $(grep -L "^disable-model-invocation: true" .claude/skills/*/SKILL.md) .claude/agents/*.md | awk '{print length}'`. One over ~300 characters is trimmed to its trigger phrases.
 - **`hunt`'s attack angles** stay under the budget their own section states (`wc -c` of that section); past it, merge same-class angles and drop retired ones - a class a lint rule now catches, an API that is gone.
 

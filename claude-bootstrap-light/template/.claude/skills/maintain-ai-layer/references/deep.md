@@ -13,7 +13,7 @@ The units are:
 - `.claude/hooks/README.md`;
 - every tracked README under the source directory.
 
-Run one `drift` in `section` mode per unit, in waves of **eight in parallel**. Each prompt asks for the non-`holds` entries plus the tally only, and carries `references/settled.md` and this run's decisions so far. Between waves, check and apply the returned pairs, so that the next wave reads the corrected text.
+Run one `drift` in `section` mode per unit, in waves of **eight in parallel**. Each run lists only the claims that need action, and each prompt carries `references/settled.md` and this run's decisions so far. Between waves, check and apply the returned pairs, so that the next wave reads the corrected text.
 
 ## D2. Rules
 
@@ -38,6 +38,7 @@ The memory folder is the one Claude Code keeps for this project: `~/.claude/proj
 
 - Run `node .claude/skills/maintain-ai-layer/layer-refs.mjs <memory folder>`.
 - Check that `MEMORY.md` lists every file in the folder once, and that every line points to an existing file. Fix the index directly.
+- Memory holds machine-specific, personal and cross-repo facts only. A memory that duplicates the layer is proposed for deletion; one that carries project knowledge is proposed for a move - a settled decision to `CLAUDE.md` Architecture, a mechanic to the rule or skill that reaches its code.
 - For each memory whose fact the code or the layer now contradicts (a named file or flag gone, a decision `CLAUDE.md` reversed, a duplicate of a layer rule), write one line in the report: the file, the contradiction, and the proposed action (update or delete). Change nothing until the owner confirms.
 
 ## D6. Workflow walk

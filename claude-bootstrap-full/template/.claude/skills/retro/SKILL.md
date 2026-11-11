@@ -12,17 +12,17 @@ No praise padding and no self-flagellation. "I should be more careful" is not a 
 
 ## 1. Collect the evidence - from the record, not from memory
 
-- This session's artifact folder: `task-<slug>.md` (findings with decisions, one line per round) and `agents.md` (every launch and its verdict).
-- The conversation, oldest first. **The strongest signal is every time the user caught something** - pointed at a defect, asked "why didn't you", had to repeat or correct an instruction. Quote each.
+- This session's task file, `task-<slug>.md` (findings with decisions, the decisions taken on the user's behalf), when the task had one.
+- The conversation, oldest first: every agent launch and what its report returned are in it. **The strongest signal is every time the user caught something** - pointed at a defect, asked "why didn't you", had to repeat or correct an instruction. Quote each.
 - Rework: a file or a concern edited in more than one round, a decision reversed, a change undone.
-- Friction: Stop-hook blocks and the waivers written for them, denied tool calls, commands that failed or had to be retried, guard refusals.
+- Friction: Stop-hook blocks, denied tool calls, commands that failed or had to be retried, guard refusals.
 - Cost against value: agents launched against findings accepted, the tier picked against what the diff actually was.
 - What stayed unverified at the end, and why.
 
 ## 2. Sort it
 
 - **Worked** - only what has evidence: what it caught, prevented or settled. A step that ran and found nothing is not an entry.
-- **Went badly** - each item with the moment (a quote, a `file:line`, a round), what it cost (a round, a user correction, a waiver, wasted launches) and the root cause: a knowledge gap, a skipped or mis-ordered step, an unchecked assumption, a gap in the tooling or the docs.
+- **Went badly** - each item with the moment (a quote, a `file:line`, a round), what it cost (a round, a user correction, wasted launches) and the root cause: a knowledge gap, a skipped or mis-ordered step, an unchecked assumption, a gap in the tooling or the docs.
 
 Settled user decisions are context, not mistakes - do not relitigate them.
 
@@ -30,9 +30,9 @@ Settled user decisions are context, not mistakes - do not relitigate them.
 
 Fix each at the cheapest layer that would have caught it, in this order of preference:
 
-1. a tool that fails - a lint rule, a check script, a `rules-reach` fixture pair, a hook;
-2. a prohibition in `CLAUDE.md`;
-3. detail in the path-scoped rule that loads on the code;
+1. a tool that fails - a lint rule, a check script, a hook;
+2. one line in the path-scoped rule that loads on the code, for a reachable defect class;
+3. a prohibition in `CLAUDE.md` - only one that must be known before any file is read;
 4. a step in a skill;
 5. a memory entry - for a habit with no file to change.
 
@@ -42,4 +42,4 @@ Numbered list, each entry: **the problem** in one line, **the proposal** (what, 
 
 ## 4. After the answer
 
-Apply the chosen items through the normal lifecycle - the change's class decides the steps, and a `.claude/` or `CLAUDE.md` change still gets `drift`. A habit goes into memory as a `feedback` entry. Record the retro's outcome as one line in the task file.
+Apply the chosen items through the normal lifecycle - the change's class and tier decide the steps. A habit goes into memory as a `feedback` entry. Record the retro's outcome as one line in the task file.
