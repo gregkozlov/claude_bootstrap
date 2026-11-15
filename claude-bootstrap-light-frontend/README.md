@@ -1,6 +1,6 @@
-# Claude Code working layer - light
+# Claude Code working layer - light, for a frontend
 
-A small, project-agnostic working layer for Claude Code, cut from the full one in `../claude-bootstrap-full` for a **20 dollar plan**: one lifecycle, **at most three agent launches per task** - `hunt` on the plan and on the diff, `drift` on the docs only when a doc names what changed or a bug was fixed (plus a scoped second `hunt` round when a fix is itself non-trivial, and an `Explore` when step 1 has to sweep an unfamiliar area) - one deterministic guard, and a `CLAUDE.md` held under 20 KB because it is paid for on every turn.
+A small, project-agnostic working layer for a **codebase with a UI**, cut from the full one in `../claude-bootstrap-full-frontend` for a **20 dollar plan** (a server codebase takes `../claude-bootstrap-light-backend`): one lifecycle, **at most three agent launches per task** - `hunt` on the plan and on the diff, `drift` on the docs only when a doc names what changed or a bug was fixed (plus a scoped second `hunt` round when a fix is itself non-trivial, and an `Explore` when step 1 has to sweep an unfamiliar area) - one deterministic guard, and a `CLAUDE.md` held under 20 KB because it is paid for on every turn.
 
 ```
 README.md      this file
@@ -10,7 +10,7 @@ template/      what a project receives (CLAUDE.md, .claude/*)
 
 ## Install
 
-1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-light`.
+1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-light-frontend`.
 2. Open Claude Code in your project, preferably on Opus at high effort (`claude --model opus --effort high`, or `/model opus` and `/effort high` in a running session): the install reads your repo and merges with whatever Claude config you already have. It is a one-off cost; the layer runs cheap afterwards.
 3. Paste the prompt below with the path filled in. If Claude Code asks to read the unpacked folder, allow it (or add it first with `/add-dir <path>`).
 4. When it is done, restart Claude Code and run `/maintain-ai-layer init`: it writes the project sections of `CLAUDE.md`, builds the path-scoped rules from your code and tunes `hunt` to the project.
@@ -18,7 +18,7 @@ template/      what a project receives (CLAUDE.md, .claude/*)
 The same prompt updates a layer installed from an older version of this bootstrap.
 
 ```text
-Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-light> into this project.
+Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-light-frontend> into this project.
 
 1. Read <path>/INSTALL.md first and follow it - it covers a first install and an update of a layer installed earlier.
 2. Never overwrite what this project already has (CLAUDE.md, AGENTS.md, anything under .claude/): merge it, and say what happened to each file.
@@ -30,6 +30,7 @@ Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-
 ## What is in it
 
 - **One lifecycle, six steps** (`CLAUDE.md`, Development Workflow): classify, the consumer walk plus a plan review, implement, one review pass, the docs check, close with what stays unverified, what was decided on the user's behalf and three suggested commit subjects. Bug reports enter through the `debug` skill.
+- **The reachability bar** (`CLAUDE.md`, Working Principles): a defect counts only when one real user reaches it through the interface in ordinary work, and every finding states its click path. What is out of scope - two tabs at once, an unmount mid-await, a backend answer outside its contract - is named, so neither the main thread nor the reviewer spends tokens on coding for it or reporting it; a borderline case is one "Not pursued" line. On a small plan this is the cheapest saving in the layer: a review round that chases an unreachable bug costs a whole launch.
 - **One reviewer**, the `hunt` subagent: runtime defects only, every finding a concrete failure scenario traced through the real implementation the change consumes, with an attack-angle library the project feeds with its own bugs. Two modes: the plan before it is approved, the diff after it is written. `sonnet` at medium effort by default - one line of frontmatter raises it.
 - **One doc checker**, the `drift` subagent, which keeps the layer true to the code without a manual pass: every claim a changed identifier touches is re-checked by a command and comes back as an exact `replace:` / `with:` pair, and after a bug fix it proposes the one rule line no doc had. Two modes: `diff` at lifecycle step 5, launched only when the main thread's grep finds a doc naming what changed or the task fixed a bug, and `section <name>` from `maintain-ai-layer`. Read-only, `sonnet` at medium effort.
 - **One guard**, `guard.mjs`, the full layer's guard with its two test suites unchanged; the hook itself differs only in a comment noting that its `hunt` write fence only narrows `hunt`'s Bash movers here. It refuses: mutating git however the command is spelled, `gh` writes, shell writes and in-place edits into the tree, a copy or move into the tree, deletes beyond the one grant, `cd` outside a subshell, protected paths, dashes. It costs no tokens - it runs locally - which is why it is the one part that was not trimmed.
@@ -42,7 +43,7 @@ Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-
 | --- | --- |
 | `gate` (static review agent) | the main thread runs the check command itself - one Bash call instead of a whole agent context |
 | `twins`, `comments` | the sibling question is the `debug` skill's "who else does this", and `hunt` re-greps the consumers; comments are a `CLAUDE.md` rule |
-| The review ladder (`crosscheck`) and the reachability bar | one rule: a non-trivial change gets `hunt`, a trivial one gets nothing |
+| The review ladder (`crosscheck`) | one rule: a non-trivial change gets `hunt`, a trivial one gets nothing |
 | Session artifact folders, `compact-pointer.mjs` | a verdict written into the chat, and `handoff.md` when the session must survive |
 | The Stop hook (`stop-check.mjs`) | it can cost an extra turn per block; the lifecycle's own step 3 and step 6 run the check command |
 | `rules-reach.mjs`, `dev-servers.mjs`, `run-pure.mjs`, `verify-live` | project-specific machinery; `.claude/rules/*.md` with a `paths:` frontmatter still works, and `maintain-ai-layer` measures a rule's reach with `git ls-files` instead - no glob-shape check |

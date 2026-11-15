@@ -1,6 +1,6 @@
-# Claude Code project bootstrap
+# Claude Code working layer - full, for a frontend
 
-A project-agnostic copy of a Claude Code working layer built and audited on a production web frontend: one task lifecycle, one review ladder, deterministic guards, and agents fenced to a single job each. A model installs it into your project by following `INSTALL.md`, then `/maintain-ai-layer init` fills the project-specific parts from your code - the project-specific pieces of the original are kept under `examples/` for reference, never copied.
+The full working layer for a **codebase with a UI** - a project-agnostic copy of a Claude Code layer built and audited on a production web frontend (a server codebase takes `../claude-bootstrap-light-backend`): one task lifecycle, one review ladder, deterministic guards, and agents fenced to a single job each. A model installs it into your project by following `INSTALL.md`, then `/maintain-ai-layer init` fills the project-specific parts from your code - the project-specific pieces of the original are kept under `examples/` for reference, never copied.
 
 ```
 README.md     this file
@@ -11,7 +11,7 @@ examples/     project-specific pieces, rewritten onto one invented app, each say
 
 ## Install
 
-1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-full`.
+1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-full-frontend`.
 2. Open Claude Code in your project, preferably on Opus at high effort (`claude --model opus --effort high`, or `/model opus` and `/effort high` in a running session): the install reads your repo and merges with whatever Claude config you already have.
 3. Paste the prompt below with the path filled in. If Claude Code asks to read the unpacked folder, allow it (or add it first with `/add-dir <path>`).
 4. When it is done, restart Claude Code and run `/maintain-ai-layer init`: it writes the project sections of `CLAUDE.md`, builds the path-scoped rules from your code and tunes the agents and skills to the project.
@@ -19,7 +19,7 @@ examples/     project-specific pieces, rewritten onto one invented app, each say
 The same prompt updates a layer installed from an older version of this bootstrap.
 
 ```text
-Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-full> into this project.
+Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-full-frontend> into this project.
 
 1. Read <path>/INSTALL.md first and follow it - it covers a first install and an update of a layer installed earlier.
 2. Never overwrite what this project already has (CLAUDE.md, AGENTS.md, anything under .claude/): merge it, and say what happened to each file.

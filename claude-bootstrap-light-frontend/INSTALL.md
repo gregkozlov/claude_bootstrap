@@ -17,8 +17,8 @@ git -C PROJECT rev-parse --show-toplevel && git -C PROJECT status --short | head
 ls -a PROJECT; ls -a PROJECT/.claude
 ```
 
-- **An update of this layer** - the project already has it from an earlier version of this bootstrap: `.claude/hooks/guard.mjs` opens with the "PreToolUse guard" header and `.claude/skills/handoff/` exists. Go to section U, then come back for steps 5, the `.gitignore` part of 6, 7 and 8.
-- **The other variant of this bootstrap** - the same guard header, but `.claude/skills/lifecycle/` and no `.claude/skills/handoff/`: the full layer is installed. Stop and ask the user whether to replace it with this one; never merge the two.
+- **An update of this layer** - the project already has it from an earlier version of this bootstrap: `.claude/hooks/guard.mjs` opens with the "PreToolUse guard" header, `.claude/skills/handoff/` exists and `.claude/hooks/backend-guard.mjs` does not. Go to section U, then come back for steps 5, the `.gitignore` part of 6, 7 and 8.
+- **Another variant of this bootstrap** - the same guard header, but `.claude/skills/lifecycle/` and no `.claude/skills/handoff/` (the full frontend layer), or `.claude/hooks/backend-guard.mjs` (the light backend layer). Stop and ask the user whether to replace it with this one; never merge two.
 - **A first install** - everything else, including a project with Claude config of its own that this bootstrap did not write. Steps 2-8.
 
 A project that is not a git repository: say so once and skip the git commands - the layer works, only the docs check at lifecycle step 5 loses its file list.

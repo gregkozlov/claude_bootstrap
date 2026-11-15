@@ -18,7 +18,7 @@ ls -a PROJECT; ls -a PROJECT/.claude
 ```
 
 - **An update of this layer** - the project already has it from an earlier version of this bootstrap: `.claude/hooks/guard.mjs` opens with the "PreToolUse guard" header and `.claude/skills/lifecycle/` exists. Go to section U, then come back for steps 5, 7, 8 and 9.
-- **The other variant of this bootstrap** - the same guard header, but `.claude/skills/handoff/` and no `.claude/skills/lifecycle/`: the light layer is installed. Stop and ask the user whether to replace it with this one; never merge the two.
+- **Another variant of this bootstrap** - the same guard header, but `.claude/skills/handoff/` and no `.claude/skills/lifecycle/`: a light layer is installed, the frontend one or, with `.claude/hooks/backend-guard.mjs`, the backend one. Stop and ask the user whether to replace it with this one; never merge two.
 - **A first install** - everything else, including a project with Claude config of its own that this bootstrap did not write. Steps 2-9.
 
 A working tree with uncommitted changes is fine, but name them in the report: the owner reviews your changes beside theirs.
