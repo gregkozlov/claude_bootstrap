@@ -17,7 +17,7 @@ const daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toIS
 const cases = [
   ['no stamp (nudge)', null, false, /has no recorded run/],
   ['stamp from today (silent)', `${daysAgo(0)}\n`, false, null],
-  ['stamp 13 days old (silent)', `${daysAgo(13)}\n`, false, null],
+  ['stamp 29 days old (silent)', `${daysAgo(29)}\n`, false, null],
   ['stamp 30 days old (nudge)', `${daysAgo(30)}\n`, false, /last ran 30 days ago/],
   ['unreadable stamp (nudge)', 'last week\n', false, /has no recorded run/],
   ['stamp 30 days ahead (nudge)', `${daysAgo(-30)}\n`, false, /dated in the future/],

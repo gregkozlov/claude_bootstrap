@@ -10,7 +10,7 @@ wc -c <root>/CLAUDE.md
 node <root>/.claude/scripts/rules-reach.mjs             # weight report: per-file rule text, per-rule reach, globs matching nothing
 node <root>/.claude/scripts/rules-reach.mjs --check     # glob shape + the 20 KiB per-rule budget
 node <root>/.claude/skills/maintain-ai-layer/layer-refs.mjs   # dead paths, package scripts, skill and agent names in every tracked *.md
-git -C <root> log --since=14.days --name-only --format= -- <SRC_DIR> | sort | uniq -c | sort -rn | head -40
+git -C <root> log --since=30.days --name-only --format= -- <SRC_DIR> | sort | uniq -c | sort -rn | head -40
 ```
 
 ## 2. Mechanical fixes

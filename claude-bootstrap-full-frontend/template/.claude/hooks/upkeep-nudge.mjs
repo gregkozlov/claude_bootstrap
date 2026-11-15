@@ -8,7 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const STAMP = '.claude/.last-maintain';
-const DUE_DAYS = 14;
+const DUE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BOM = 0xfeff;
 

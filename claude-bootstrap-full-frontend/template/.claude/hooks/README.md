@@ -5,7 +5,7 @@ Four dependency-free Claude Code hooks (Node 18+, no packages), every script and
 | Hook | Event | Registered in | What it does |
 | --- | --- | --- | --- |
 | `guard.mjs` | `PreToolUse` on `Bash`, `PowerShell`, `Edit`, `Write`, `MultiEdit` | `.claude/settings.json` (tracked - repo policy, like the deny list beside it) | Refuses a tool call CLAUDE.md forbids outright, before it runs |
-| `upkeep-nudge.mjs` | `SessionStart` (startup, clear) | `.claude/settings.json` (tracked) | Says so when the `maintain-ai-layer` pass is 14 days overdue, or never ran in this tree |
+| `upkeep-nudge.mjs` | `SessionStart` (startup, clear) | `.claude/settings.json` (tracked) | Says so when the `maintain-ai-layer` pass is 30 days overdue, or never ran in this tree |
 | `compact-pointer.mjs` | `SessionStart` (startup, resume, clear, compact) + `PreCompact` + `PostCompact` | `.claude/settings.json` (tracked) | Names this session's artifact folder. `SessionStart` hands the model the session id prefix and the folder it has, or the name to open one under (`additionalContext`), and on `compact` where to resume from; `PreCompact` and `PostCompact` name the folder to the user (`systemMessage` - the harness rejects `hookSpecificOutput` on `PostCompact`), and on a manual `/compact` `PreCompact` says a handoff needs `/precompact` first. Both compaction events stay silent when the session has no folder |
 | `stop-check.mjs` | `SessionStart` (startup, resume, clear, compact; timeout 30) + `Stop` (timeout 180) | `.claude/settings.json` (tracked) | Runs `<CHECK_COMMAND>` at the end of a turn when the tree moved off the session's start state, and blocks once on a failure |
 
@@ -62,7 +62,7 @@ Every line must read `ok`; the tests set `CLAUDE_PROJECT_DIR` themselves. The pa
 
 ## upkeep-nudge.mjs - the upkeep reminder
 
-Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer` after a `weekly`, `deep` or `init` run) and, when it is 14 days old or more, more than a day ahead, missing or unreadable, injects a line telling the model to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file): the pass runs in the main tree, and a second tree would be told so on every session. It reports and never blocks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`.
+Reads the date in `.claude/.last-maintain` (gitignored, one `YYYY-MM-DD` line, written by `maintain-ai-layer` after a `weekly`, `deep` or `init` run) and, when it is 30 days old or more, more than a day ahead, missing or unreadable, injects a line telling the model to tell the user once that `/maintain-ai-layer` is due - never to start it. Silent in a linked worktree (the nearest `.git` is a file): the pass runs in the main tree, and a second tree would be told so on every session. It reports and never blocks. Self-test: `node .claude/hooks/tests/upkeep-nudge-test.mjs`.
 
 ## stop-check.mjs - the Stop hook
 

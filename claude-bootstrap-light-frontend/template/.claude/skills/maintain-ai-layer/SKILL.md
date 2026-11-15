@@ -12,8 +12,8 @@ The AI layer rots quietly: a file moves and a rule still names it, a count grows
 
 The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (an alias reads its mode's file): read that file before the first step, and only the others it names, plus `references/settled.md` (Standing rules).
 
-- **`weekly`** (also `weekly-maintenance`, and the default with no argument) - the cheap pass, every week or two: the mechanical checks in the main thread, and at most three `drift` runs on the places the recent changes reached.
-- **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, the `rules` steps, cross-file consistency, the hooks, the memory and a walk of whole tasks through the lifecycle. Dozens of agent launches: run it after a large refactor, or every month or two.
+- **`weekly`** (also `weekly-maintenance`, and the default with no argument) - the cheap pass, about once a month (the mode keeps its name, the reminder sets the pace): the mechanical checks in the main thread, and at most three `drift` runs on the places the recent changes reached.
+- **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, the `rules` steps, cross-file consistency, the hooks, the memory and a walk of whole tasks through the lifecycle. Dozens of agent launches: run it after a large refactor, or a few times a year.
 - **`rules`** - the rule set alone, in depth: every rule checked against the code, `paths:` over- and under-reach, a rule whose sections serve different files split, new rules from a sweep of the code and its fix history, stale ones corrected or deleted. With no project rule, it builds the set from the whole project. Run it after a large code change.
 - **`init`** - the project-specific parts, from a survey of the repo: the `[fill]` sections of `CLAUDE.md`, the rule set built or updated and enriched, and the units tuned to the project. Run it once right after the install, and again whenever the project has moved on; a second run updates, it never rebuilds. `rules` touches the rules alone, `deep` audits the layer as it stands.
 
@@ -36,7 +36,7 @@ This layer ships no reach checker, so the reach of a rule - the files whose Read
 - **The layer is team-shared.** A personal preference never goes into `CLAUDE.md` or a rule: it goes to `CLAUDE.local.md`, or into the report as a suggestion.
 - **Edits use Edit / Write only.** No commits, plain hyphens. If the branch is not the default one, say so before the first edit - an AI-layer edit riding on a feature branch is the owner's call.
 - **Record the run** in `<scratchpad>/ai-layer-<mode>.md` (this session's scratchpad): the mode, the baseline numbers, every finding with its decision (applied, rejected with the reason, reported), and the numbers after. Every agent prompt names the files it may read and carries the decisions this run already took. A run that may outlive the session (`deep`, `rules`, `init`) runs `handoff` before a `/compact`, naming that file.
-- **Stamp the run.** A `weekly`, `deep` or `init` run in the main tree ends by writing today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`; `upkeep-nudge.mjs` reads it at session start and asks for the next pass after 14 days. `rules` does not stamp.
+- **Stamp the run.** A `weekly`, `deep` or `init` run in the main tree ends by writing today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`; `upkeep-nudge.mjs` reads it at session start and asks for the next pass after 30 days. `rules` does not stamp.
 - **Every agent this skill launches runs on Sonnet.** Pass `model: "sonnet"` on each `Agent` call and no `effort`, so `drift` keeps its frontmatter's and the built-ins run at their usual effort. A claim-by-claim check does not need a bigger model.
 
 ## Report
