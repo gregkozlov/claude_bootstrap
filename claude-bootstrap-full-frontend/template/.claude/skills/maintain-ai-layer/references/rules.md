@@ -47,9 +47,9 @@ A rule needs no pointer in `CLAUDE.md`: it loads by itself with its files.
 First, what exists:
 
 - **No `rules-reach.mjs`**: stop and say so. A rule set nobody can measure is not built by hand.
-- **No `.claude/rules/` folder**: go to R7 after the weekly step 1 commands; the report and `--check` run on an empty set.
+- **No `.claude/rules/` folder**: go to R7 after the `references/deep.md` M1 commands; the report and `--check` run on an empty set.
 
-Then `references/weekly.md` steps 1 and 2, and the inventory into the task file - per rule: its bytes, its `##` headings, its globs and its reach (`node .claude/scripts/rules-reach.mjs --files <rule> | wc -l`, every file kind; the report's "Files" column counts `<SRC_DIR>/` code only) - and the union of all reach lists against `git ls-files --cached --others --exclude-standard <SRC_DIR>`: the **unreached folders**, where no rule loads at all.
+Then `references/deep.md` M1 and M2, and the inventory into the task file - per rule: its bytes, its `##` headings, its globs and its reach (`node .claude/scripts/rules-reach.mjs --files <rule> | wc -l`, every file kind; the report's "Files" column counts `<SRC_DIR>/` code only) - and the union of all reach lists against `git ls-files --cached --others --exclude-standard <SRC_DIR>`: the **unreached folders**, where no rule loads at all.
 
 **No project rule** - no rule whose reach holds a file outside `.claude/` - sends the run to R7; R2-R5 have nothing to work on.
 
@@ -107,7 +107,7 @@ It lands as a line or a paragraph in the rule whose `paths:` reach those files, 
 
 ## R6. Verify
 
-`node .claude/scripts/rules-reach.mjs --check`, the report, `layer-refs` and `wc -c CLAUDE.md`, against R1. Then `references/weekly.md` step 7. `rules` does not stamp `.last-maintain`.
+`node .claude/scripts/rules-reach.mjs --check`, the report, `layer-refs` and `wc -c` of the layer's `CLAUDE.md` (`SKILL.md`, Standing rules), against R1. Then `references/deep.md` D7. `rules` does not stamp `.last-maintain`.
 
 ## R7. No project rule: build the set
 

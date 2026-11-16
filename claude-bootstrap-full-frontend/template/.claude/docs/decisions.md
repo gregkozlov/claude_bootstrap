@@ -2,7 +2,7 @@
 
 Decisions already taken about this codebase, each with its reason. A fresh review would otherwise rediscover them and raise them again.
 
-- **Who reads it.** `crosscheck` greps it by the diff's files and identifiers and hands the matching entries to every reviewer as settled. `drift`, `hunt` (in its `area` and `refute` modes) and `maintain-ai-layer` read it too, and the plan review at lifecycle step 2b gets the entries that match the plan's files.
+- **Who reads it.** `crosscheck` hands its path to every reviewer, who greps it by the diff's files and identifiers and treats a matching entry as settled. `drift`, `hunt` (in every mode) and `maintain-ai-layer` read it too.
 - **What a match means.** A finding that matches an entry is reported as `settled (decisions.md)`, not as a defect - unless it brings evidence the entry did not have, which reopens it.
 - **When an entry stops applying.** An entry describes code. When that code changes, the entry no longer binds and the finding is judged fresh.
 - **Not here.** What `CLAUDE.md` or a `.claude/rules/*.md` file already states, and open work: a live defect belongs in the backlog. A count, path or behaviour an entry cites is re-measured before it is relied on.

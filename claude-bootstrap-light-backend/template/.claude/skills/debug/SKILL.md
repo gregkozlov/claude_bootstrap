@@ -1,6 +1,6 @@
 ---
 name: debug
-description: The procedure for every bug report. Load it before touching code - a stack trace, a failing request, a wrong response or status, a log line, "it does not work", "why does it", "find out why", a wrong number, "/debug".
+description: The procedure for every bug report. Load it before touching code on a defect report - "is broken", "does not work", a stack trace or an error in a log, a failing request, a wrong response, status or value, a screenshot of a fault, "/debug".
 ---
 
 # debug
@@ -17,8 +17,9 @@ Then, still before reading code: **what moved since it last worked?** `git log -
 
 Run it against the local instance or the test database: the request, the command, the script - or a test that fails for the reported reason, an existing one or, where the project's convention has tests (`CLAUDE.md` Tests), a new one. The bug is reproduced when **you have observed** the wrong response, row or behaviour, not when the code "would" produce it.
 
+- **A local instance**: start the service with `run_in_background` on a free port and stop it once the run is recorded, or ask the owner to start it. Throwaway containers a test provisions itself (Testcontainers) count as local. A run that may take longer than 10 minutes goes to the background and is awaited to its exit.
 - Reproduced: keep the exact steps, they are the proof in phase 4.
-- **Never reproduce against a shared or production environment**, and never read its secrets to get there. What happened there reaches you as evidence the owner hands over: log lines, a trace id, the request, a row with its personal data removed. Ask for exactly what phase 2 needs.
+- **Never reproduce against a shared or production environment**, and never read its secrets to get there. What happened there reaches you as evidence the owner hands over: log lines, a trace id, the request, a screenshot, a row with its personal data removed. That pasted evidence is the observation for phases 0 and 2; ask for exactly what phase 2 needs.
 - **Intermittent** (it shows on some runs, not on others): repeat the trigger under the same conditions before any diagnosis and note the rate (`3 of 10 requests`); only then change one variable per run - the load, the order, the data, the timing. Two requests at once is a condition, not noise. The phase-4 re-run repeats the same number of tries - one clean try of a bug seen in three of ten proves nothing.
 - Not reproducible on the data you can reach (a tenant, a volume, a row shape that only exists elsewhere): say so, name what would be needed, and offer instrumentation or a targeted question instead of a fix. **No fix ships for a bug nobody has seen.**
 - Nothing to run it against (no local database, no fake for the outside service): phase 0 and the static half of phase 2 still run, then the turn ends asking the owner for what is missing - no named cause, no fix.

@@ -1,6 +1,6 @@
 ---
 name: debug
-description: The procedure for every bug report. Load it before touching code - a screenshot, "it does not work", "why does it", "find out why", a console error, a wrong number, "/debug".
+description: The procedure for every defect report. Load it before touching code - "is broken", "does not work", a wrong value, an error or console error, a screenshot of a fault, "/debug".
 ---
 
 # debug
@@ -15,8 +15,9 @@ Then, still before reading code: **what moved since it last worked?** `git log -
 
 ## 1. Reproduce - see it yourself
 
-Run it: the app, the command, the script, with the user's inputs. The bug is reproduced when **you have observed** the wrong value, state or behaviour, not when the code "would" produce it.
+Run it: the command, the script, the pure function, with the user's inputs. The bug is reproduced when **you have observed** the wrong value, state or behaviour, not when the code "would" produce it.
 
+- **The running app is the user's.** This layer has no browser tool, so a fault that shows only in the UI is observed through the user's screenshot, console output or network paste - that paste is the phase-1 observation. Ask for the one that is missing (the raw response, not only the rendered value). The fix is then proved by the pure-part run before and after (phase 4), and the user confirms once in the app.
 - Reproduced: keep the exact steps, they are the proof in phase 4.
 - **Intermittent** (it shows on some runs, not on others): repeat the trigger under the same conditions before any diagnosis and note the rate (`3 of 10 loads`); only then change one variable per run. The phase-4 re-run repeats the same number of tries - one clean try of a bug seen in three of ten proves nothing.
 - Not reproducible on the data you can reach (a tenant, a permission, a day with no data): say so, name what would be needed, and offer instrumentation or a targeted question instead of a fix. **No fix ships for a bug nobody has seen.**
@@ -51,7 +52,7 @@ If two hypotheses survive, do not fix both: design the one observation that sepa
 The smallest change at the cause, not at the symptom. Say the class, then run the lifecycle from step 2 in `CLAUDE.md`. This skill adds:
 
 - **The proof is the reproduction, before and after.** The pure-part run on the observed input (phase 2, Derivation) or the reproduction of phase 1 shows the wrong value before the fix and the right one after it; both outputs are named in the reply. A run that does not show the wrong value before the fix means the cause is named wrong - back to phase 3, no fix.
-- **The reproduction from phase 1 is re-run**, and its outcome stated with the observed value, not "works now".
+- **The reproduction from phase 1 is re-run**, and its outcome stated with the observed value, not "works now". When the phase-1 observation was the user's paste, ask the user to confirm once in the app and name that as pending in the close.
 - **A second fix that does not close the reproduction stops the work.** Two failed fixes mean the cause is not what was named; report both attempts and the pattern they share, and the third attempt is the user's call - it is usually a wrong model of the code, not a wrong line.
 
 ## Anti-patterns

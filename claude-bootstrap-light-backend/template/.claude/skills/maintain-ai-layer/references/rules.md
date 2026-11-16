@@ -1,6 +1,6 @@
 # rules mode
 
-The rule set, and nothing else in the layer: every rule checked against the code, each `paths:` matched to the files its text needs (over-reach and under-reach), a rule whose sections serve different files split, and the rules the code needs and no layer file states added. With no project rule at all - the state right after the install, which ships none - R7 builds the set from the whole project. `deep` runs R1's inventory, R2's two decisions and R3-R5 as its D2, or R7 when there is no project rule.
+The rule set, and nothing else in the layer: every rule checked against the code, each `paths:` matched to the files its text needs (over-reach and under-reach), a rule whose sections serve different files split, and the rules the code needs and no layer file states added. With no project rule at all - the state right after the install, which ships none - R7 builds the set from the whole project. `deep` runs R1's inventory, R2's two decisions and R3-R5 as its D5, or R7 when there is no project rule.
 
 The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "Measuring a rule" says; this layer has no reach checker, so a rule's reach is proved by that measurement alone, before and after every change.
 
@@ -14,7 +14,7 @@ The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "
 
 ## R1. Baseline
 
-`references/weekly.md` steps 1 and 2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source folders (`CLAUDE.md` Folder conventions lists them; a server's code rarely sits under one root): the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
+`references/deep.md` steps D1 and D2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source folders (`CLAUDE.md` Folder conventions lists them; a server's code rarely sits under one root): the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
 
 **No project rule** - no `.claude/rules/*.md`, or none whose reach holds a file outside `.claude/` - sends the run to R7; R2-R5 have nothing to work on.
 
@@ -68,7 +68,7 @@ It lands as a line or a paragraph in the rule whose `paths:` reach those files, 
 
 ## R6. Verify
 
-The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c CLAUDE.md`, against R1. Then `references/weekly.md` step 6, without the stamp: `rules` does not stamp.
+The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c` of the layer's `CLAUDE.md`, against R1. Then `references/deep.md` step D10, without the stamp: `rules` does not stamp.
 
 ## R7. No project rule: build the set
 

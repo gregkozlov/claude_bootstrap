@@ -52,7 +52,7 @@ Static review cannot catch wrong data-shape assumptions - scales, units, sort vo
 
 ## Adjudicate
 
-Each finding is checked against the code and the reachability bar and accepted or rejected with a one-line reason (pre-existing and out of scope, factually wrong, contradicts a measured fact, outside the bar, cure worse than the disease). Reviewers are input, not verdicts. Each decision goes into the task file in one line. When a reviewer offers a minimal fix (drop the offending element) and a fuller one, on a visual or designer-sourced ticket the fuller fix that serves the ticket's stated goal wins over the smaller diff - take it or ask; "out of scope" is for a fix the ticket does not ask for.
+The findings of `twins`, `gate`, `hunt` and `drift` are never applied on trust; the edits of `comments` and the project's editor agents need no review. Each finding is checked against the code and the reachability bar and accepted or rejected with a one-line reason (pre-existing and out of scope, factually wrong, contradicts a measured fact, outside the bar, cure worse than the disease). Reviewers are input, not verdicts. Each decision goes into the task file in one line. When a reviewer offers a minimal fix (drop the offending element) and a fuller one, on a visual or designer-sourced ticket the fuller fix that serves the ticket's stated goal wins over the smaller diff - take it or ask; "out of scope" is for a fix the ticket does not ask for.
 
 ## Report
 

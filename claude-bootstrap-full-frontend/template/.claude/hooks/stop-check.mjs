@@ -169,11 +169,15 @@ async function handleStop(payload) {
   const tail = output.trimEnd().split(/\r?\n/).slice(-TAIL_LINES).join('\n');
   if (overran) return { systemMessage: `Stop check: "${CHECK}" overran ${BUDGET_MS / 1000} s and was killed. Nothing was verified.` };
   if (code === null) return { systemMessage: `Stop check could not run:\n${tail}\nNothing was verified.` };
+  // With no tree key (no git, a git error) the failure's own output keys the block, digits masked so a duration or a
+  // clock line does not make the same failure new: it blocks once, and a pass in between re-arms it.
+  const blocked = key ?? `no-git-${sha256(tail.replace(/\d+/g, '#'))}`;
   if (code === 0) {
-    if (key) writeState(file, { ...state, lastPassed: key });
+    writeState(file, key ? { ...state, lastPassed: key } : { ...state, lastBlocked: undefined });
     return null;
   }
-  writeState(file, { ...state, lastBlocked: key });
+  if (!key && blocked === state.lastBlocked) return null;
+  writeState(file, { ...state, lastBlocked: blocked });
   return {
     decision: 'block',
     reason: `"${CHECK}" failed:\n${tail}\n\nA failure in a file this task neither touched nor reaches is the owner's own edit or a parallel session's - say so instead of fixing it.`,

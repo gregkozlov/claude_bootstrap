@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 // PreToolUse guard: refuses the tool calls CLAUDE.md forbids outright, before they run.
-//   Bash / PowerShell - a git verb that commits, stages, publishes or discards work wherever it sits in the
-//                       command (behind `git -C`, `$(...)`, `xargs`, `cmd /c`, a quoted path to the binary, an
-//                       interpreter one-liner or a `bash -c` / `iex` body), a read git verb that runs a program
-//                       or writes a file (`git grep -O<cmd>`, `--output=<file>`), a `gh` call that writes, a shell
-//                       write or in-place edit into the project, a copy or move whose target is inside the
-//                       project, a delete beyond the one grant (one non-recursive project path per call, never a
-//                       protected path, `.git`, the hooks or the settings), and a `cd` that moves the working
-//                       directory for every later call. A Bash variable a leading statement sets to a literal
-//                       (`S="<path>"; cp a "$S/b"`) is judged as that literal.
+//   Bash / PowerShell - a git verb that commits, stages, publishes or discards work where a shell runs git (at
+//                       command position behind `git -C`, `$(...)`, `xargs`, `cmd /c`, a quoted path to the
+//                       binary, a `bash -c` / `iex` body; anywhere inside an interpreter's code), a tool that
+//                       commits or tags through git (`npm version`, `release-it`), a read git verb that runs a
+//                       program or writes a file (`git grep -O<cmd>`, `--output=<file>`), a `gh` call that writes,
+//                       a shell write or in-place edit into the project (formatters included), a copy or move
+//                       whose target is inside the project, a delete beyond the one grant (one non-recursive
+//                       project path per call, never a protected path, `.git`, the hooks or the settings), and a
+//                       `cd` that moves the working directory for every later call. A Bash variable a leading
+//                       statement sets to a literal (`S="<path>"; cp a "$S/b"`) is judged as that literal, and one
+//                       set from `mktemp` as scratch.
 //   Edit / Write      - a path matching PROTECTED_PATHS (generated or externally owned files), any written line
-//                       carrying a dash character, and for an agent in FENCED_AGENTS (`hunt`) any project path
-//                       but the ones its entry allows.
+//                       carrying an en or em dash, and for an agent in FENCED_AGENTS (`hunt`) any project path
+//                       but the ones its entry allows. NotebookEdit is judged the same.
 // Registered in .claude/settings.json (tracked) - it is repo policy, like the deny list beside it.
 // Reads one JSON payload on stdin; exit 2 with the reason on stderr blocks the call, exit 0 allows it.
 // A guard that cannot parse its input allows the call: the deny list and the rules still stand behind it.
@@ -23,18 +25,32 @@ import path from 'node:path';
 // backslash turned into "/" first - write them with forward slashes, matching the path's tail, e.g.
 // ["src/api/generated/", "\\.openapi\\.json$"]. An empty list protects nothing. Filled at install as a JSON array
 // inside the raw string (INSTALL.md); edit freely afterwards. The unfilled placeholder and an empty string read as
-// an empty list, so a missed fill leaves every other check working; anything else is parsed for real, so a misfill
-// (a bare string, a broken array) throws rather than silently protecting nothing - and a hook that throws allows
-// every call, so run the self-tests after filling it.
+// an empty list. A misfill (a bare string, a broken array, a bad regex) is named in one stderr line and also reads as
+// an empty list, so every other check stays live - run the self-tests after filling it.
 const PROTECTED_RAW = String.raw`<GENERATED_PATHS>`;
-const PROTECTED_SOURCES = PROTECTED_RAW.startsWith('<') || !PROTECTED_RAW.trim() ? [] : JSON.parse(PROTECTED_RAW);
-const PROTECTED_PATHS = PROTECTED_SOURCES.map((source) => new RegExp(source));
+// Windows and macOS file systems ignore case: there `SRC/API/x.ts` is the same file as `src/api/x.ts`.
+const PATH_FLAGS = process.platform === 'win32' || process.platform === 'darwin' ? 'i' : '';
+const PROTECTED_PATHS = regexList('PROTECTED_PATHS', PROTECTED_RAW);
+
+// A hook that throws at load exits 1, which allows every call, so a misfilled list costs only itself.
+function regexList(name, raw) {
+  if (raw.startsWith('<') || !raw.trim()) return [];
+  try {
+    const sources = JSON.parse(raw);
+    if (!Array.isArray(sources) || !sources.every((source) => typeof source === 'string')) throw new Error('not an array of strings');
+    return sources.map((source) => new RegExp(source, PATH_FLAGS));
+  } catch (error) {
+    process.stderr.write(`guard.mjs: ${name} is not a JSON array of regex sources (${error.message}); it protects nothing until it is fixed.\n`);
+    return [];
+  }
+}
 
 // `stash` is not here: it is judged by an allow list in gitCallWrites.
 const GIT_WRITE_VERBS = new Set([
   'commit', 'commit-tree', 'push', 'pull', 'reset', 'rebase', 'merge', 'mergetool', 'tag', 'cherry-pick', 'revert',
   'am', 'checkout', 'checkout-index', 'switch', 'restore', 'clean', 'add', 'stage', 'rm', 'mv', 'filter-branch',
   'update-ref', 'update-index', 'read-tree', 'replace', 'bisect', 'gc', 'maintenance', 'repack', 'prune', 'fast-import',
+  'send-email',
 ]);
 const GIT_WRITE_SUBCOMMANDS = {
   remote: new Set(['add', 'set-url', 'rename', 'remove', 'rm', 'prune', 'set-head', 'set-branches']),
@@ -43,15 +59,26 @@ const GIT_WRITE_SUBCOMMANDS = {
   submodule: new Set(['init', 'update', 'add', 'deinit', 'sync', 'foreach', 'set-url', 'set-branch', 'absorbgitdirs']),
   worktree: new Set(['remove', 'prune', 'add', 'move', 'lock', 'unlock', 'repair']),
   notes: new Set(['add', 'append', 'copy', 'edit', 'merge', 'prune', 'remove']),
+  subtree: new Set(['add', 'merge', 'pull', 'push', 'split']),
+  // `lfs pull` / `fetch` / `install` are the ordinary steps after a clone; `migrate` rewrites history.
+  lfs: new Set(['push', 'migrate']),
 };
 const GIT_READ_VERBS = new Set(['log', 'show', 'diff', 'grep', 'blame', 'shortlog', 'status', 'rev-parse', 'ls-files']);
 const GIT_GLOBAL_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env']);
+const GIT_BINARY = /^(?:.*[\\/])?git(?:\.exe)?$/i;
+// Commands that run their arguments as a command, so a git word among them is at command position.
+const GIT_LAUNCHER = /^(?:xargs|parallel|watch|find|wsl|doas|ionice|chrt|taskset|flock|cross-env|dotenv|Start-Process|saps|start)$/i;
+// Inside code an interpreter runs from its arguments (`perl -e`, `ruby -e`, `php -r`, `deno eval`, `eval`) a git call has no
+// command position: `system('git commit')`, `['git', 'stash']`. A script file's arguments are data.
+const SCRIPT_HEAD = /^(?:node|python[\d.]*|py|perl|ruby|php|deno|bun|pwsh|powershell|Rscript|lua|eval)(?:\.exe)?$/i;
+// Tools that commit, tag or push through git themselves.
+const RELEASE_TOOL = /^(?:release-it|standard-version|commit-and-tag-version|semantic-release|lerna|changeset|@changesets\/cli)$/;
 // A search tool's arguments are patterns and paths: it cannot commit, publish or edit, so its segment skips those tests.
 const SEARCH_COMMAND = /^(?:grep|egrep|fgrep|rg|ag|findstr|Select-String|sls)$/i;
 const GH_MUTATING =
   /\bgh\s+(?:pr\s+(?:create|merge|close|edit|comment|delete|review|ready|reopen|lock|unlock)|issue\s+(?:create|close|edit|comment|delete|reopen|lock|unlock|pin|unpin|transfer|develop)|release\s+(?:create|delete|edit|upload)|repo\s+(?:create|delete|edit|fork|rename|archive|sync)|pr\s+(?:checkout|update-branch)|co|gist\s+(?:create|edit|delete)|workflow\s+(?:run|enable|disable)|run\s+(?:rerun|cancel|delete)|(?:secret|variable)\s+(?:set|delete|remove)|label\s+(?:create|edit|delete|clone)|cache\s+delete)\b/;
-// The head of a command whose script may come on stdin (`python - <<'EOF'`, `node <<EOF`, `... | node`).
-const STDIN_INTERPRETER = /^(?:node|python[\d.]*|py|deno|bun)(?:\.exe)?$/i;
+// The head of a command whose script may come on stdin (`python - <<'EOF'`, `node <<EOF`, `... | node`, `... | bash`).
+const STDIN_INTERPRETER = /^(?:node|python[\d.]*|py|deno|bun|bash|sh|zsh|dash|ksh|pwsh|powershell)(?:\.exe)?$/i;
 const ARITHMETIC = /\$\(\((?:[^()$`]|\$(?!\()|\((?:[^()$`]|\$(?!\())*\))*\)\)/g;
 // Interpreter flags whose value is the next word, so it is not the script operand (`node -r ./pre.cjs <<EOF`).
 const STDIN_VALUE_FLAG =
@@ -62,7 +89,7 @@ const SHELL_READER = /(?:^|[\s;&|(`])(?:(?:[^\s#'"]*\/)?(?:bash|sh|zsh|dash|ksh|
 const INTERPRETER_ONE_LINER =
   /\b(?:node(?:\.exe)?(?:\s+-{1,2}\w[\w-]*(?:=\S+)?)*?\s+(?:-e|--eval|-p|--print|-pe)|python[\d.]*(?:\.exe)?(?:\s+-[A-Za-z]+(?:\s+[^-\s]\S*)?)*?\s+-c|py(?:\s+-\S+)*?\s+-c|(?:pwsh|powershell)(?:\.exe)?(?:\s+-\w+(?:\s+[^-\s"']\S*)?)*?\s+-c(?:ommand)?|iex|Invoke-Expression)\b/i;
 const SCRIPT_WRITE =
-  /\b(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|rmSync|unlinkSync|truncateSync|mkdirSync|rmdirSync|openSync|open|os\.(?:remove|unlink|rmdir|mkdir|makedirs)|shutil\.rmtree|(?<=\.)rm)\s*\(/gi;
+  /\b(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|rmSync|unlinkSync|truncateSync|mkdirSync|rmdirSync|openSync|open|os\.(?:remove|unlink|rmdir|mkdir|makedirs)|shutil\.rmtree|(?<=\.)rm|(?<=\.)write_(?:text|bytes))\s*\(/gi;
 const WRITE_MODE = /^\s*(?:mode\s*=\s*)?(['"])[rbt]*[wax+][rbtwax+]*\1\s*$/;
 const SCRIPT_COPY = /\b(copyFileSync|copyFile|cpSync|renameSync|rename|shutil\.(?:copy2?|copyfile|copytree|move))\s*\(/gi;
 const DOTNET_WRITE = /\[(?:System\.)?IO\.(?:File|Directory)\]::(?:Write\w*|Append\w*|Delete|Create\w*)\s*\(/gi;
@@ -70,7 +97,7 @@ const DOTNET_COPY = /\[(?:System\.)?IO\.(?:File|Directory)\]::(Copy|Move|Replace
 const SHELL_HEAD =
   /\b((?:bash|sh|zsh)(?:\.exe)?(?:\s+-{1,2}\w[\w-]*)*?\s+-[a-zA-Z]*c|cmd(?:\.exe)?(?:\s+\/[a-zA-Z](?::\S*)?)*?\s+\/\/?[cCkK]|(?:pwsh|powershell)(?:\.exe)?(?:\s+-\w+(?:\s+[^-\s"']\S*)?)*?\s+-c(?:ommand)?|iex|Invoke-Expression)\s+/;
 const MOVER =
-  /^(?:cp|mv|install|dd|truncate|patch|shred|rsync|ed|ex|tee|robocopy|xcopy|Copy-Item|Move-Item|Rename-Item|New-Item|Remove-Item|Clear-Content|Tee-Object|cpi|mi|ri|ni|rni|ren|rm|del|erase|rd|rmdir|copy|move|unlink|clc)$/i;
+  /^(?:cp|mv|install|dd|truncate|patch|shred|rsync|ed|ex|tee|robocopy|xcopy|Copy-Item|Move-Item|Rename-Item|New-Item|Remove-Item|Clear-Content|Tee-Object|Set-Content|Add-Content|Out-File|cpi|mi|ri|ni|rni|ren|rm|del|erase|rd|rmdir|copy|move|unlink|clc)$/i;
 const LEADING_KEYWORD = /^(?:if|then|do|else|elif|while|until|!|foreach|ForEach-Object|%|nohup)$/i;
 const WRAPPER_VALUE_FLAGS = {
   env: /^-[uC]$/,
@@ -108,7 +135,7 @@ const COPIER = /^(?:cp|copy|rsync|install|Copy-Item|cpi|robocopy|xcopy)$/i;
 // cmd's own movers take `/x` switches (`//x` from Git Bash), never a path that short.
 const CMD_MOVER = /^(?:rd|rmdir|del|erase|copy|move|robocopy|xcopy)$/i;
 const VALUE_PARAMS =
-  /^-(?:ErrorAction|EA|WarningAction|WA|InformationAction|IA|ErrorVariable|EV|WarningVariable|WV|InformationVariable|IV|OutVariable|OV|OutBuffer|OB|PipelineVariable|PV|ItemType|Type|Filter|Include|Exclude|Encoding|Value|Target|Credential|Stream|Depth|Variable|Name)$/i;
+  /^-(?:ErrorAction|EA|WarningAction|WA|InformationAction|IA|ErrorVariable|EV|WarningVariable|WV|InformationVariable|IV|OutVariable|OV|OutBuffer|OB|PipelineVariable|PV|ItemType|Type|Filter|Include|Exclude|Encoding|Value|Target|Credential|Stream|Depth|Variable|Name|Width|InputObject)$/i;
 const PATH_PARAMS = /^-(?:Path|LiteralPath|PSPath|LP|FilePath)$/i;
 const DESTINATION_PARAMS = /^-(?:Destination|OutFile)$/i;
 const COPIER_DESTINATION = /^(?:-t|--target-directory)$/;
@@ -116,7 +143,7 @@ const CURL_DESTINATION = /^(?:-[A-Za-z]*o|--output)$/;
 const WGET_DESTINATION = /^(?:-[A-Za-z]*O|--output-document)$/;
 const DOWNLOADER = /^(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)$/i;
 const IN_PLACE_EDIT =
-  /\bg?sed\s+(?:-\S+\s+)*(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place)|\bperl\s+(?:-\S+\s+)*-[pnlaws]*i(?:\.\S*|[pnlaeEws]*)?(?=\s|$)|\bg?awk\b[^|]*-i\s*inplace|\b(?:Set-Content|Add-Content|Out-File)\b|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+prettier\b[^|;&]*\s(?:--write|-w)\b|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+eslint\b[^|;&]*\s--fix(?![\w-])|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint\b[^|;&]*\s--fix(?![\w-])|\bbiome\b[^|;&]*\s--(?:write|fix|apply)\b/i;
+  /\bg?sed\s+(?:-\S+\s+)*(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place)|\bperl\s+(?:-\S+\s+)*-[pnlaws]*i(?:\.\S*|[pnlaeEws]*)?(?=\s|$)|\bg?awk\b[^|]*-i\s*inplace|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+prettier\b[^|;&]*\s(?:--write|-w)\b|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+eslint\b[^|;&]*\s--fix(?![\w-])|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint\b[^|;&]*\s--fix(?![\w-])|\bbiome\b[^|;&]*\s--(?:write|fix|apply)\b/i;
 // A redirect target: `> file`, `>> file`, `2> file` (`tee` is a mover). The lookbehind keeps `<>`, `||`, `>>` and
 // an arrow function's `=>` from reading as a redirect. `>|` forces an overwrite and `>& file` / `&> file` send both
 // streams into it; `2>&1` names no file.
@@ -124,17 +151,18 @@ const WRITE_TARGET = /(?:(?<![<>|=])[\d&]?>{1,2}\|?(?!&)|(?<![<>|=\d])>&(?![\d-]
 // Allowed targets: the null devices, a temp or scratchpad path, or a shell variable that names one ($S, $TMP,
 // $TEMP, $SCRATCH, $TMPDIR, $env:TEMP, %TEMP%) or the memory directory ($M). Everything else - a relative path, a
 // path under the project, an unknown variable - is a write the Edit / Write tools should make.
-const SCRATCH_TARGET = /\/dev\/null|^\$null$|^nul$|\/tmp\/|[\\/]Temp[\\/]|scratchpad|^\$\{?(?:S|TMP|TEMP|SCRATCH|TMPDIR|M)\b|\$env:te?mp\b|%te?mp%/i;
-// Built from code points so this file itself carries no dash character.
-const DASH = new RegExp(
-  `[${String.fromCharCode(0x2014, 0x2013, 0x2012, 0x2015, 0x2011, 0x2010, 0x2212, 0xff0d, 0x2e3a, 0x2e3b, 0xfe58, 0xfe31, 0xfe32, 0xfe63)}]`,
-);
+const SCRATCH_TARGET = /\/dev\/null|^\$null$|^nul$|\/tmp\/|[\\/]Temp[\\/]|scratchpad|^\$\{?(?:S|TMP|TEMP|SCRATCH|TMPDIR|M)\b|\$\{?env:te?mp\b|%te?mp%/i;
+// The two long dashes, en (U+2013) and em (U+2014); every other dash-like character passes. Built from code points so
+// this file itself carries neither.
+const DASH = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`);
 // The write fence: an agent named here may write or delete inside the project only the paths its entry allows.
 // A project's own writer agent with a narrow job gets an entry of its own (`allowed` is tested against the
 // project-relative path with forward slashes, `what` names it in the refusal).
 const PROBE_FENCE = { allowed: PROBE_PATH, what: 'its compile probe (<SRC_DIR>/__hunt_probe*.ts)' };
 const FENCED_AGENTS = new Map([['hunt', PROBE_FENCE]]);
 const MAX_BODY_DEPTH = 3;
+const GIT_REFUSAL =
+  'Blocked by .claude/hooks/guard.mjs: this git verb commits, stages, publishes, rewrites or discards work. CLAUDE.md: apply file changes only and leave them in the working tree - the author commits.';
 
 async function readStdin() {
   const chunks = [];
@@ -160,8 +188,10 @@ function tokenize(segment, shell) {
   return [...segment.matchAll(new RegExp(`${doubleQuotedSource(shell)}|'([^']*)'|(\\S+)`, 'g'))].map((match) => match[1] ?? match[2] ?? match[3]);
 }
 
-// Unlike `tokenize`, the words Bash hands the program: escapes resolved, a quoted run glued on (`-"O"cat` is `-Ocat`).
-function shellWords(segment) {
+// Unlike `tokenize`, the words the shell hands the program: escapes resolved, a quoted run glued on (`-"O"cat` is
+// `-Ocat`). PowerShell escapes with a backtick and doubles an apostrophe inside single quotes; cmd has neither.
+function shellWords(segment, shell = 'Bash') {
+  const escape = shell === 'PowerShell' ? '`' : shell === 'cmd' ? undefined : '\\';
   const words = [];
   let word;
   let quote;
@@ -169,17 +199,20 @@ function shellWords(segment) {
     const ch = segment[index];
     const next = segment[index + 1];
     if (quote === "'") {
-      if (ch === "'") quote = undefined;
+      if (ch === "'" && shell === 'PowerShell' && next === "'") {
+        word += ch;
+        index += 1;
+      } else if (ch === "'") quote = undefined;
       else word += ch;
-    } else if (ch === '\\' && next === '\n') {
+    } else if (ch === escape && next === '\n') {
       index += 1;
-    } else if (ch === '\\' && next !== undefined && (quote === undefined || '"\\$`'.includes(next))) {
+    } else if (ch === escape && next !== undefined && (quote === undefined || escape === '`' || '"\\$`'.includes(next))) {
       word = (word ?? '') + next;
       index += 1;
     } else if (quote === '"') {
       if (ch === '"') quote = undefined;
       else word += ch;
-    } else if (ch === "'" || ch === '"') {
+    } else if ((ch === "'" && shell !== 'cmd') || ch === '"') {
       quote = ch;
       word ??= '';
     } else if (/\s/.test(ch)) {
@@ -317,6 +350,9 @@ function substitutionBodies(command, shell) {
       else if (ch === '(') depth += 1;
       else if (ch === ')' && --depth === 0) break;
     }
+    // An unclosed `$(` is a syntax error the shell refuses, and its text is judged as part of this command already.
+    // Recursing into it would rescan every later `$(` once per level, super-quadratically: a hook killed at its timeout allows.
+    if (index >= command.length) break;
     bodies.push(command.slice(start + 2, index));
     next = index + 1;
   }
@@ -363,6 +399,12 @@ function literalPath(arg) {
   if (!match) return undefined;
   if ((/f/i.test(match[1]) && match[3].includes('{')) || (match[2] === '`' && match[3].includes('${'))) return undefined;
   return match[3];
+}
+
+// The path a script write API names: its first argument, or for pathlib's `Path('x').write_text(...)` the receiver.
+function scriptWriteTarget(text, match, args) {
+  if (!/^write_/i.test(match[1])) return literalPath(args[0]);
+  return literalPath(/\bPath\(([^()]*)\)\s*\.$/.exec(text.slice(0, match.index))?.[1]);
 }
 
 function segments(command, shell) {
@@ -415,7 +457,7 @@ function stripLeading(input) {
     const glued = /^\$[\w:]+=(.+)$/.exec(token);
     const wrapper = Object.hasOwn(WRAPPER_VALUE_FLAGS, token) ? WRAPPER_VALUE_FLAGS[token] : undefined;
     if (token === 'command' && /^-[vV]$/.test(tokens[start + 1] ?? '')) break;
-    if (LEADING_KEYWORD.test(token) || /^[A-Za-z_][\w]*=\S*$/.test(token) || /^\[void\]$/i.test(token) || /^\$[\w:]+=$/.test(token)) {
+    if (LEADING_KEYWORD.test(token) || /^[A-Za-z_][\w]*=/.test(token) || /^\[void\]$/i.test(token) || /^\$[\w:]+=$/.test(token)) {
       start += 1;
     } else if (glued) {
       tokens[start] = glued[1];
@@ -455,11 +497,14 @@ function isConfigRead(rest) {
   return rest.filter((token) => !token.startsWith('-')).length <= 1;
 }
 
-function gitCallWrites(tokens, gitIndex) {
+function gitVerbIndex(tokens, gitIndex) {
   let index = gitIndex + 1;
-  while (index < tokens.length && tokens[index].startsWith('-')) {
-    index += GIT_GLOBAL_WITH_VALUE.has(tokens[index]) ? 2 : 1;
-  }
+  while (index < tokens.length && tokens[index].startsWith('-')) index += GIT_GLOBAL_WITH_VALUE.has(tokens[index]) ? 2 : 1;
+  return index;
+}
+
+function gitCallWrites(tokens, gitIndex) {
+  const index = gitVerbIndex(tokens, gitIndex);
   const verb = tokens[index];
   const rest = tokens.slice(index + 1);
   if (verb === undefined) return false;
@@ -471,12 +516,35 @@ function gitCallWrites(tokens, gitIndex) {
   if (verb === 'config') return !isConfigRead(rest);
   if (verb === 'branch') return rest.some((token) => /^(?:-[a-zA-Z]*[dDmMfcC][a-zA-Z]*|--delete|--move|--force|--copy|--set-upstream-to(?:=\S*)?|-u|--unset-upstream|--edit-description)$/.test(token));
   if (verb === 'symbolic-ref') return rest.filter((token) => !token.startsWith('-')).length >= 2;
+  // A refspec with a local destination moves a branch (`git fetch . HEAD:main`); a remote-tracking one does not.
+  if (verb === 'fetch') return rest.filter((token) => !token.startsWith('-')).slice(1).some((token) => /^\+?[^:]*:(?!refs\/remotes\/)\S/.test(token));
   const subcommands = GIT_WRITE_SUBCOMMANDS[verb];
   if (subcommands) return subcommands.has(rest.find((token) => !token.startsWith('-')) ?? '');
   return false;
 }
 
-function gitWrites(text) {
+// The words the program receives, the leading assignments and wrappers stripped: a quoted `-C "a b"` stays one word.
+function commandWords(segment, shell) {
+  return stripLeading(shellWords(segment.trim(), shell));
+}
+
+// Git is judged where a shell runs it: at command position or after a launcher, so `echo "never git push"` and
+// `npm test -- -t 'git checkout flow'` are text. Inside an interpreter's code every git word counts.
+function gitWrites(segment, shell) {
+  const words = commandWords(segment, shell);
+  const head = words[0] ?? '';
+  if (GIT_BINARY.test(head)) return gitCallWrites(words, 0);
+  const run = unwrapRunner(words);
+  if (GIT_BINARY.test(run[0] ?? '')) return gitCallWrites(run, 0);
+  const launched = (list) => list.some((word, index) => GIT_BINARY.test(word) && gitCallWrites(list, index));
+  // PowerShell hands `Start-Process git 'commit','-m','x'` its arguments as one comma or space list.
+  if (GIT_LAUNCHER.test(head)) return launched(words.slice(1)) || launched(words.slice(1).flatMap((word) => word.split(/[\s,]+/).filter(Boolean)));
+  const code = SCRIPT_HEAD.test(toolName(head)) && (/^eval$/.test(head) || words.some((word) => /^(?:-[a-zA-Z]*[eEr]|--eval|eval|-c|-Command)$/i.test(word)));
+  if (INTERPRETER_ONE_LINER.test(segment) || code) return gitWritesAnywhere(segment);
+  return false;
+}
+
+function gitWritesAnywhere(text) {
   const tokens = normalizeGit(text).split(/\s+/).filter(Boolean);
   return tokens.some((token, index) => token === 'git' && gitCallWrites(tokens, index));
 }
@@ -484,21 +552,177 @@ function gitWrites(text) {
 // The allow list's read-only git prefixes pass these with no prompt: grep's `-O<cmd>` (in a cluster or abbreviated too) runs a
 // program, and `--output=<file>` writes one. Judged on the words git receives, so a quoted `"-Ocat"` counts.
 function gitReadEscapes(segment, shell) {
-  const words = stripLeading(shellWords((shell === 'PowerShell' ? segment.replace(/`(.)/g, '$1') : segment).trim()));
-  if (!/^(?:\S*[\\/])?git(?:\.exe)?$/i.test(words[0] ?? '')) return false;
-  let index = 1;
-  while (index < words.length && words[index].startsWith('-')) index += GIT_GLOBAL_WITH_VALUE.has(words[index]) ? 2 : 1;
+  const words = commandWords(segment, shell);
+  if (!GIT_BINARY.test(words[0] ?? '')) return false;
+  const index = gitVerbIndex(words, 0);
   const verb = words[index];
   return words.slice(index + 1).some((word) => /^--output(?:=|$)/.test(word) || (verb === 'grep' && /^(?:--op|-[A-Za-z0-9]*O)/.test(word)));
 }
 
-function firstGitVerb(text) {
-  const tokens = normalizeGit(text).split(/\s+/).filter(Boolean);
-  const gitIndex = tokens.indexOf('git');
-  if (gitIndex < 0) return undefined;
-  let index = gitIndex + 1;
-  while (index < tokens.length && tokens[index].startsWith('-')) index += GIT_GLOBAL_WITH_VALUE.has(tokens[index]) ? 2 : 1;
-  return tokens[index];
+function firstGitVerb(segment, shell) {
+  const words = commandWords(segment, shell);
+  return GIT_BINARY.test(words[0] ?? '') ? words[gitVerbIndex(words, 0)] : undefined;
+}
+
+const toolName = (word) => (word ?? '').replace(/^.*[\\/]/, '').replace(/\.(?:exe|cmd)$/i, '');
+
+// The tool a runner starts: `npx x`, `pnpm exec x`, `yarn dlx x`, `npm exec -- x`, `python -m x`, `uv run x`, `uvx x`.
+function unwrapRunner(words) {
+  let rest = words;
+  for (let round = 0; round < 3; round += 1) {
+    const name = toolName(rest[0]);
+    const second = rest[1] ?? '';
+    let skip = 0;
+    if (/^(?:npx|bunx|uvx)$/i.test(name)) skip = 1;
+    else if ((/^(?:pnpm|yarn)$/i.test(name) && /^(?:exec|dlx)$/.test(second)) || (/^npm$/i.test(name) && second === 'exec')) skip = 2;
+    else if (/^(?:uv|poetry|pdm|hatch|rye|pipenv|pipx)$/i.test(name) && second === 'run') skip = 2;
+    else if (/^(?:python[\d.]*|py)$/i.test(name)) {
+      const module = rest.findIndex((word, index) => index > 0 && (word === '-m' || !word.startsWith('-')));
+      if (rest[module] === '-m') skip = module + 1;
+    }
+    if (skip === 0) return rest;
+    rest = rest.slice(skip);
+    while (rest[0]?.startsWith('-')) rest = rest.slice(/^(?:-p|--package|--with|--python|--from|--spec|--directory|--project)$/.test(rest[0]) ? 2 : 1);
+  }
+  return rest;
+}
+
+// `npm version patch` commits and tags; `--no-git-tag-version` only bumps the files. Bare `npm version` lists versions.
+function releaseWrites(words) {
+  const head = toolName(words[0]);
+  if (/^(?:npm|pnpm|yarn)$/i.test(head)) {
+    let index = 1;
+    while (words[index]?.startsWith('-')) index += /^(?:--prefix|-C|--cwd|--dir|--filter|-F|-w|--workspace)$/.test(words[index]) ? 2 : 1;
+    if (words[index] === 'version') {
+      const rest = words.slice(index + 1);
+      if (rest.some((word) => /^(?:--no-git-tag-version|--git-tag-version=false)$/.test(word))) return false;
+      return /^yarn$/i.test(head) || rest.some((word) => !word.startsWith('-'));
+    }
+  }
+  const [tool = '', ...args] = /^(?:yarn|pnpm|bun)$/i.test(head) && RELEASE_TOOL.test(words[1] ?? '') ? words.slice(1) : unwrapRunner(words);
+  const name = tool.startsWith('@') ? tool.replace(/(?<=.)@[^/]*$/, '') : toolName(tool).replace(/@.*$/, '');
+  if (!RELEASE_TOOL.test(name)) return false;
+  const first = args.find((arg) => !arg.startsWith('-'));
+  if (name === 'lerna') return first === 'version' || first === 'publish';
+  // `changeset publish` publishes and tags; `changeset version` only rewrites the files, like the bump above.
+  if (/changeset/.test(name)) return first === 'publish' || first === 'tag';
+  return !args.some((arg) => /^(?:--dry-run|-d|--help|-h|--version|-v|-V)$/.test(arg));
+}
+
+// Another ecosystem's formatter rewrites its operands unless a check flag keeps it read-only. A project's own task
+// (`./gradlew spotlessApply`, `npm run format`) is its own script and passes.
+function formatterWrites(words) {
+  let [tool, ...args] = unwrapRunner(words);
+  let name = toolName(tool);
+  if (/^java$/i.test(name) && /google-java-format/.test(args[args.indexOf('-jar') + 1] ?? '')) {
+    name = 'google-java-format';
+    args = args.slice(args.indexOf('-jar') + 2);
+  }
+  const has = (pattern) => args.some((arg) => pattern.test(arg));
+  const subcommand = args.find((arg) => !arg.startsWith('-') && !arg.startsWith('+'));
+  const help = /^(?:--help|-h|--version|-V)$/;
+  switch (name) {
+    case 'black':
+      return !has(/^(?:--check|--diff|--code|-c)$/) && !has(help) && !args.includes('-');
+    case 'ruff':
+      return (subcommand === 'format' && !has(/^(?:--check|--diff)$/) && !has(help)) || (has(/^--fix(?:-only)?$/) && !has(/^--diff$/));
+    case 'gofmt':
+      return has(/^--?w(?:=true)?$/);
+    case 'go':
+      return subcommand === 'fmt' && !has(/^-n$/);
+    case 'dotnet':
+      return subcommand === 'format' && !has(/^(?:--verify-no-changes|--check|--help|-h|-\?)$/);
+    case 'dotnet-format':
+      return !has(/^(?:--verify-no-changes|--check|--dry-run|--help|-h)$/);
+    case 'cargo':
+      return subcommand === 'fmt' && !has(/^--check$/) && !has(help);
+    case 'rustfmt': {
+      const operands = args.filter((arg, index) => !arg.startsWith('-') && !/^(?:--emit|--edition|--config|--config-path|--color|--style-edition)$/.test(args[index - 1] ?? ''));
+      return operands.length > 0 && !has(/^(?:--check|--emit=stdout)$/) && args[args.indexOf('--emit') + 1] !== 'stdout' && !has(help);
+    }
+    case 'ktlint':
+      return has(/^(?:-F|--format)$/);
+    case 'google-java-format':
+      return has(/^(?:-i|-r|--?replace)$/);
+    case 'clang-format':
+      return has(/^--?i$/);
+    case 'rubocop':
+      return has(/^(?:-a|-A|-x|--auto-?correct(?:-all)?|--fix-layout)$/);
+    default:
+      return false;
+  }
+}
+
+// GNU sed's `w` / `W` command and the `w` flag of `s` write a file: `sed -n 'w out' x`, `sed 's/a/b/w out' x`. Its `e`
+// command and the `e` flag of `s` run a shell command, reported as SED_EXEC.
+const SED_EXEC = Symbol('sed e');
+
+function sedWriteTargets(words) {
+  if (!/^g?sed$/i.test(toolName(words[0]))) return [];
+  const scripts = [];
+  let implicit;
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (/^(?:-[a-zA-Z]*e|--expression)$/.test(word)) scripts.push(words[(index += 1)] ?? '');
+    else if (word.startsWith('--expression=')) scripts.push(word.slice('--expression='.length));
+    else if (/^(?:-[a-zA-Z]*[fl]|--file|--line-length)$/.test(word)) index += 1;
+    else if (!word.startsWith('-') && implicit === undefined) implicit = word;
+  }
+  if (scripts.length === 0 && implicit !== undefined) scripts.push(implicit);
+  return scripts.flatMap(sedScriptWrites);
+}
+
+function sedScriptWrites(script) {
+  const targets = [];
+  let index = 0;
+  const lineEnd = () => (script.indexOf('\n', index) < 0 ? script.length : script.indexOf('\n', index));
+  // From an opening delimiter to just past its unescaped closing one.
+  const pastDelimited = () => {
+    const delimiter = script[index];
+    for (index += 1; index < script.length && script[index] !== delimiter; index += 1) if (script[index] === '\\') index += 1;
+    index += 1;
+  };
+  while (index < script.length) {
+    // Separators and an address: line numbers, `$`, `/re/` or `\cREc` with its flags, a range, a step, `!`.
+    for (;;) {
+      const ch = script[index];
+      if (ch !== undefined && /[\s;{}!,~+$0-9]/.test(ch)) index += 1;
+      else if (ch === '/' || (ch === '\\' && script[index + 1] !== undefined)) {
+        if (ch === '\\') index += 1;
+        pastDelimited();
+        while (/[IM]/.test(script[index] ?? '')) index += 1;
+      } else break;
+    }
+    const command = script[index];
+    if (command === undefined) break;
+    index += 1;
+    if (command === 'w' || command === 'W') {
+      targets.push(script.slice(index, lineEnd()).trim());
+      index = lineEnd();
+    } else if (command === 's' || command === 'y') {
+      if (script[index] === undefined || /[\n\\]/.test(script[index])) break;
+      pastDelimited();
+      index -= 1;
+      pastDelimited();
+      while (command === 's' && /[gpiImMe0-9w]/.test(script[index] ?? '')) {
+        if (script[index] === 'e') targets.push(SED_EXEC);
+        if (script[index] === 'w') {
+          targets.push(script.slice(index + 1, lineEnd()).trim());
+          index = lineEnd();
+          break;
+        }
+        index += 1;
+      }
+    } else if (command === 'e') {
+      targets.push(SED_EXEC);
+      index = lineEnd();
+    } else if ('aicrR:#'.includes(command)) {
+      index = lineEnd();
+    } else if ('btT'.includes(command)) {
+      while (index < script.length && !/[;\n]/.test(script[index])) index += 1;
+    }
+  }
+  return targets.filter(Boolean);
 }
 
 function ghWrites(text) {
@@ -552,7 +776,7 @@ function moverArguments(tokens, context) {
 }
 
 function moverTargets(verb, { positional, paths, destinations }) {
-  if (/^Tee-Object$/i.test(verb)) return [...paths, ...positional.slice(0, 1)];
+  if (/^(?:Tee-Object|Set-Content|Add-Content|Out-File)$/i.test(verb)) return [...paths, ...positional.slice(0, 1)];
   if (DOWNLOADER.test(verb)) return destinations.filter((target) => target !== '-');
   if (COPIER.test(verb)) {
     if (destinations.length > 0) return destinations;
@@ -575,6 +799,14 @@ function normalizedPath(target) {
 function checkMovers(segment, context) {
   const tokens = stripLeading(tokenize(segment.trim(), context.shell));
   if (tokens.length === 0) return;
+  if (context.shell === 'PowerShell') {
+    // `sc` and `ac` are PowerShell's aliases for Set-Content and Add-Content (under Bash they are other programs).
+    if (/^(?:sc|ac)$/i.test(tokens[0])) tokens[0] = /^sc$/i.test(tokens[0]) ? 'Set-Content' : 'Add-Content';
+    // A comma list spread over words (`a, b`) is one argument naming several paths.
+    for (let index = tokens.length - 1; index > 0; index -= 1) {
+      if (tokens[index - 1].endsWith(',') || tokens[index].startsWith(',')) tokens.splice(index - 1, 2, tokens[index - 1] + tokens[index]);
+    }
+  }
   const xargs = tokens.findIndex((token) => /^xargs$/i.test(token));
   if (xargs >= 0 && tokens.slice(xargs + 1).some((token) => MOVER.test(token))) {
     deny('Blocked by .claude/hooks/guard.mjs: a mover behind xargs, whose targets cannot be judged. CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write, and an orphaned file is deleted one path at a time.');
@@ -602,7 +834,7 @@ function checkMovers(segment, context) {
   // Split like the cap above: judged whole, `$env:TEMP\x,<protected>` would pass as scratch.
   for (const target of targets.flatMap((item) => (item.split(',').some(Boolean) ? item.split(',').filter(Boolean) : [item]))) {
     if (unresolvable(target)) {
-      deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" on "${target}", a variable this check cannot resolve. CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write, and an orphaned file is deleted one named path at a time. Only $S, $TMP, $TEMP, $SCRATCH, $TMPDIR, $M, $env:TEMP and %TEMP% resolve as scratch.`);
+      deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" on "${target}", a variable this check cannot resolve. CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write, and an orphaned file is deleted one named path at a time. Only $S, $TMP, $TEMP, $SCRATCH, $TMPDIR, $M, $env:TEMP, %TEMP% and a name set from mktemp resolve as scratch.`);
     }
     if (isScratchTarget(target)) continue;
     if (context.fence && !fencedPath(target, context.cwd, context.fence.allowed)) {
@@ -687,7 +919,7 @@ function commentsBlanked(command, shell) {
 // A `cd` at the head of a top-level command moves the cwd for every later call. Bash subshells are exempt, since a
 // child's cwd dies with it; PowerShell's parentheses and script blocks move the session's own, so they are not.
 function checkChdir(command, shell) {
-  const bare = unquoted(command, shell);
+  const bare = unquoted(heredocBodiesBlanked(command, shell), shell);
   let depth = 0;
   let start = 0;
   const pieces = [];
@@ -744,25 +976,27 @@ function readsScriptFromStdin(command, shell) {
     if (words.slice(0, end < 0 ? words.length : end).some((word) => ONE_LINER_FLAG.test(word))) return false;
     if (words.includes('-')) return true;
     const operand = words.find((word) => !word.startsWith('-'));
-    return fed && (operand === undefined || !/[\\/]|\.(?:[cm]?[jt]sx?|py)$/i.test(operand));
+    return fed && (operand === undefined || !/[\\/]|\.(?:[cm]?[jt]sx?|py|sh|ps1)$/i.test(operand));
   });
 }
 
 // Each heredoc body and its terminator blanked line by line, so no body line is read as a command. Only a `<<`
 // outside quotes and comments opens one; a body that never ends, or one a shell reads, leaves the command as it is.
-function heredocBodiesBlanked(command, shell) {
+// `quotedOnly` blanks only the bodies the shell does not expand (`<<'EOF'`, `<<\EOF`): an unquoted one runs its `$(...)`.
+function heredocBodiesBlanked(command, shell, quotedOnly = false) {
   if (shell !== 'Bash') return command;
   const pending = [];
   const blanked = command
     .split('\n')
     .map((line) => {
       if (pending.length > 0) {
-        if (line.replace(/\r$/, '').replace(/^\t+/, '') === pending[0]) pending.shift();
-        return '';
+        const { word, quoted } = pending[0];
+        if (line.replace(/\r$/, '').replace(/^\t+/, '') === word) pending.shift();
+        return quotedOnly && !quoted ? line : '';
       }
       const bare = unquoted(commentsBlanked(line, shell), shell);
-      for (const match of line.matchAll(/<<-?\s*\\?(['"]?)([\w.-]+)\1/g)) {
-        if (bare.startsWith('<<', match.index) && line[match.index - 1] !== '<') pending.push(match[2]);
+      for (const match of line.matchAll(/<<-?\s*(\\?)(['"]?)([\w.-]+)\2/g)) {
+        if (bare.startsWith('<<', match.index) && line[match.index - 1] !== '<') pending.push({ word: match[3], quoted: Boolean(match[1] || match[2]) });
       }
       return line;
     })
@@ -774,7 +1008,10 @@ function checkCommand(command, context, depth = 0) {
   if (typeof command !== 'string') return;
   // Arithmetic `$(( $a > b ))` compares, it does not redirect; one holding a `$(` or a backtick keeps being checked.
   if (context.shell === 'Bash') command = command.replace(ARITHMETIC, (match) => ' '.repeat(match.length));
-  checkFind(command, context.shell);
+  // A heredoc body no shell reads is data or another program's code (`python3 - <<'X'`, `psql <<'SQL'`, notes into
+  // /tmp): its `>`, `cd` and `git push` lines are not commands. An interpreter's body is judged as its code below.
+  const code = heredocBodiesBlanked(command, context.shell);
+  checkFind(code, context.shell);
   const bare = unquoted(command, context.shell);
   const escape = escapeChar(context.shell);
   for (const match of command.matchAll(DOTNET_WRITE)) {
@@ -790,42 +1027,53 @@ function checkCommand(command, context, depth = 0) {
     for (const match of command.matchAll(SCRIPT_WRITE)) {
       const args = callArguments(command, match.index + match[0].length, '\\');
       if (/^open/i.test(match[1]) && !args.slice(1).some((arg) => WRITE_MODE.test(arg))) continue;
-      judgeWrite([literalPath(args[0])], `${match[1]} from a script an interpreter reads on stdin`);
+      judgeWrite([scriptWriteTarget(command, match, args)], `${match[1]} from a script an interpreter reads on stdin`);
     }
     for (const match of command.matchAll(SCRIPT_COPY)) {
       const args = callArguments(command, match.index + match[0].length, '\\').map(literalPath);
       judgeWrite(/rename|move/i.test(match[1]) ? [args[1], args[0]] : [args[1]], `${match[1]} from a script an interpreter reads on stdin`);
     }
+    if (gitWritesAnywhere(command)) deny(GIT_REFUSAL);
   }
-  for (const segment of segments(command, context.shell)) {
+  for (const segment of segments(code, context.shell)) {
     const head = stripLeading(tokenize(segment.trim(), context.shell))[0] ?? '';
     const substitution = singleQuotesBlanked(segment, context.shell).includes('$(');
     const search = !substitution && SEARCH_COMMAND.test(head);
     // A one-liner keeps all its code in quotes, so a read before a write must not turn the whole segment into text.
-    const readGit = !substitution && !INTERPRETER_ONE_LINER.test(segment) && GIT_READ_VERBS.has(firstGitVerb(segment) ?? '');
+    const readGit = !substitution && !INTERPRETER_ONE_LINER.test(segment) && GIT_READ_VERBS.has(firstGitVerb(segment, context.shell) ?? '');
     // A search's pattern and a read git verb's quoted argument are text, not commands.
     const text = search || readGit ? unquoted(segment, context.shell) : segment;
     if (!search) {
-      if (gitWrites(text)) {
-        deny('Blocked by .claude/hooks/guard.mjs: this git verb commits, stages, publishes, rewrites or discards work. CLAUDE.md: apply file changes only and leave them in the working tree - the author commits.');
-      }
+      if (gitWrites(segment, context.shell)) deny(GIT_REFUSAL);
       if (ghWrites(text)) {
         deny('Blocked by .claude/hooks/guard.mjs: gh must not create, merge, edit or close anything - the author publishes.');
       }
       if (gitReadEscapes(segment, context.shell)) {
         deny('Blocked by .claude/hooks/guard.mjs: git grep -O / --open-files-in-pager starts a program and --output writes a file. Read git without them; a file is changed with Edit or Write.');
       }
+      const words = commandWords(segment, context.shell);
+      if (releaseWrites(words)) {
+        deny('Blocked by .claude/hooks/guard.mjs: this tool commits, tags or pushes through git (npm / pnpm / yarn version, release-it, standard-version, semantic-release, lerna version / publish, changeset publish). CLAUDE.md: apply file changes only - the author commits; `npm version <v> --no-git-tag-version` only bumps the files.');
+      }
       // No scratch exemption: an in-place edit's target cannot be told from the rest of the command, so a `/tmp/`
       // anywhere in the line would wave through a `sed -i` on a source.
-      if (IN_PLACE_EDIT.test(normalizeGit(text))) {
-        deny('Blocked by .claude/hooks/guard.mjs: an in-place edit from the shell (sed -i, perl -i, awk -i inplace, Set-Content, prettier --write, eslint --fix). CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write.');
+      if (IN_PLACE_EDIT.test(normalizeGit(text)) || formatterWrites(words)) {
+        deny('Blocked by .claude/hooks/guard.mjs: an in-place edit from the shell (sed -i, perl -i, awk -i inplace, prettier --write, eslint --fix, black, ruff format / --fix, gofmt -w, go fmt, dotnet format, cargo fmt, rustfmt, ktlint -F, google-java-format -i, clang-format -i, rubocop -a). CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write; a check flag (--check, --diff, --verify-no-changes) only reads.');
+      }
+      for (const target of sedWriteTargets(words)) {
+        if (target === SED_EXEC) {
+          deny("Blocked by .claude/hooks/guard.mjs: sed's e command (or the e flag of s) runs a shell command no check reads. Run the command itself.");
+        }
+        if (!/^\/dev\/(?:stdout|stderr)$/.test(target) && !isScratchTarget(target)) {
+          deny(`Blocked by .claude/hooks/guard.mjs: sed's w command writes "${target}". CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write; scratch output goes under the session scratchpad or /tmp.`);
+        }
       }
     }
     if (INTERPRETER_ONE_LINER.test(segment)) {
       for (const match of segment.matchAll(SCRIPT_WRITE)) {
         const args = callArguments(segment, match.index + match[0].length, '\\');
         if (/^open/i.test(match[1]) && !args.slice(1).some((arg) => WRITE_MODE.test(arg))) continue;
-        judgeWrite([literalPath(args[0])], `${match[1]} from inside an interpreter one-liner`);
+        judgeWrite([scriptWriteTarget(segment, match, args)], `${match[1]} from inside an interpreter one-liner`);
       }
       for (const match of segment.matchAll(SCRIPT_COPY)) {
         const args = callArguments(segment, match.index + match[0].length, '\\').map(literalPath);
@@ -834,20 +1082,22 @@ function checkCommand(command, context, depth = 0) {
     }
     if (!search) checkMovers(segment, context);
   }
-  for (const match of unquoted(command, context.shell).matchAll(WRITE_TARGET)) {
+  for (const match of unquoted(code, context.shell).matchAll(WRITE_TARGET)) {
     const target = match[1];
     if (!isScratchTarget(target)) {
-      deny(`Blocked by .claude/hooks/guard.mjs: a shell write to "${target}". CLAUDE.md, Shell and file edits: repo files are changed with Edit or Write; scratch output goes under the session scratchpad or /tmp. Only $S, $TMP, $TEMP, $SCRATCH, $TMPDIR, $M, $env:TEMP and %TEMP% resolve as scratch.`);
+      deny(`Blocked by .claude/hooks/guard.mjs: a shell write to "${target}". CLAUDE.md, Shell and file edits: repo files are changed with Edit or Write; scratch output goes under the session scratchpad or /tmp. Only $S, $TMP, $TEMP, $SCRATCH, $TMPDIR, $M, $env:TEMP, %TEMP% and a name set from mktemp resolve as scratch.`);
     }
   }
   if (depth < MAX_BODY_DEPTH) {
-    for (const { shell, body } of shellBodies(command, context.shell)) {
+    for (const { shell, body } of shellBodies(code, context.shell)) {
       for (const view of new Set([body, commentsBlanked(body, shell)])) checkCommand(view, { ...context, shell }, depth + 1);
     }
   }
-  // Each body is strictly shorter than the command, so this recursion ends without a depth cap.
-  for (const body of substitutionBodies(command, context.shell)) checkCommand(body, context, depth);
-  if (context.shell === 'Bash') for (const body of backtickBodies(command)) checkCommand(body, context, depth);
+  // Each body is strictly shorter than the command, so this recursion ends without a depth cap. A quoted heredoc's
+  // `$(...)` is text; an unquoted one's runs.
+  const expanded = heredocBodiesBlanked(command, context.shell, true);
+  for (const body of substitutionBodies(expanded, context.shell)) checkCommand(body, context, depth);
+  if (context.shell === 'Bash') for (const body of backtickBodies(expanded)) checkCommand(body, context, depth);
 }
 
 function judgeWrite(targets, what) {
@@ -951,6 +1201,57 @@ function withLeadingLiterals(command, shell) {
   return unresolvedScratchNames(single || double ? command : out, new Map([...values, ...rebound]), raws);
 }
 
+// `T=$(mktemp)` names a fresh temp path, so each later `$T` / `${T}` reads as a scratch variable - unless the name is
+// bound any other way in the command, or the template or `-p` directory lies inside the project (`mktemp x.XXXX` is the cwd).
+const MKTEMP_ASSIGNMENT = /(?:^|[;&|\n({])\s*(?:export\s+)?([A-Za-z_]\w*)=(?:"\$\(\s*mktemp\b([^()`;&|]*)\)"|\$\(\s*mktemp\b([^()`;&|"]*)\)|`\s*mktemp\b([^()`;&|]*)`)(?=[\s;&|)]|$)/g;
+
+function mktempScratch(args) {
+  const words = shellWords(args.trim());
+  let rooted = false;
+  for (let index = 0; index < words.length; index += 1) {
+    const word = words[index];
+    const dir = /^(?:-p|--tmpdir)$/.test(word) ? words[(index += 1)] : (/^--tmpdir=(.*)$/.exec(word) ?? /^-p(.+)$/.exec(word))?.[1];
+    if (dir !== undefined || /^(?:-[a-zA-Z]*t[a-zA-Z]*|--tmpdir)$/.test(word)) {
+      if (dir !== undefined && !isScratchTarget(dir)) return false;
+      rooted = true;
+    } else if (!word.startsWith('-') && (!rooted || /[\\/]/.test(word)) && !isScratchTarget(word)) return false;
+  }
+  return true;
+}
+
+// PowerShell's own: `$t = New-TemporaryFile`, `(New-TemporaryFile).FullName`, `[IO.Path]::GetTempFileName()`.
+const TEMPFILE_ASSIGNMENT =
+  /(?:^|[;\n{(|])\s*\$([A-Za-z_]\w*)\s*=\s*(?:New-TemporaryFile|\(\s*New-TemporaryFile\s*\)\.FullName|\[(?:System\.)?IO\.Path\]::GetTempFileName\(\s*\))\s*(?=[;\n})|]|$)/gi;
+
+function withMktempNames(command, shell) {
+  const powershell = shell === 'PowerShell';
+  if (shell !== 'Bash' && !powershell) return command;
+  // PowerShell's variable names ignore case.
+  const key = (name) => (powershell ? name.toLowerCase() : name);
+  const assigned = new Map();
+  for (const match of command.matchAll(powershell ? TEMPFILE_ASSIGNMENT : MKTEMP_ASSIGNMENT)) {
+    const entry = assigned.get(key(match[1])) ?? { name: match[1], count: 0, scratch: true, at: match.index + match[0].length };
+    entry.count += 1;
+    entry.scratch &&= powershell || mktempScratch(match[2] ?? match[3] ?? match[4] ?? '');
+    assigned.set(key(match[1]), entry);
+  }
+  for (const [id, { name, count, scratch }] of assigned) {
+    const assignments = powershell
+      ? (command.match(new RegExp(`\\$${name}\\s*[-+*/]?=(?!=)`, 'gi'))?.length ?? 0)
+      : (command.match(new RegExp(`(?:^|[^\\w$])${name}(?:\\[[^\\]]*\\])?\\+?=`, 'g'))?.length ?? 0);
+    const binds = powershell
+      ? new RegExp(`foreach\\s*\\(\\s*\\$${name}\\b|-(?:OutVariable|ov|ErrorVariable|ev|WarningVariable|wv|InformationVariable|iv|PipelineVariable|pv|Variable|Name)\\s*:?\\s*['"]?${name}\\b|\\[ref\\]\\s*\\$${name}\\b`, 'i')
+      : new RegExp(`(?:^|[^\\w$])(?:(?:for|select)\\s+${name}\\b|(?:read|unset|declare|typeset|local|mapfile|readarray)\\b[^;&|\\n]*\\b${name}\\b|printf\\s+-v\\s*${name}\\b|\\$\\{${name}:?=|\\{${name}\\}[<>])`);
+    if (!scratch || assignments !== count || binds.test(command)) assigned.delete(id);
+  }
+  if (assigned.size === 0) return command;
+  const visible = singleQuotesBlanked(command, shell);
+  return command.replace(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*)(?![\w:]))/g, (whole, braced, bare, offset) => {
+    const entry = assigned.get(key(braced ?? bare));
+    return entry && offset >= entry.at && visible[offset] === '$' ? `$TMP/__mktemp_${entry.name}` : whole;
+  });
+}
+
 // Unsubstituted, `$S` would pass as scratch by its name alone, whatever the command set it to.
 function unresolvedScratchNames(command, values, raws) {
   let out = command;
@@ -1010,13 +1311,14 @@ try {
     deleted: new Set(),
   };
   if ((tool === 'Bash' || tool === 'PowerShell') && typeof input.command === 'string') {
-    input.command = withLeadingLiterals(input.command, tool);
+    input.command = withLeadingLiterals(withMktempNames(input.command, tool), tool);
     // Both views, refused if either refuses: the raw one is never looser than the blanker's guesses about shell grammar.
     for (const command of new Set([input.command, commentsBlanked(input.command, tool)])) {
       checkChdir(command, tool);
       checkCommand(command, context);
     }
   } else if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit') checkWrite(input, context);
+  else if (tool === 'NotebookEdit') checkWrite({ file_path: input.notebook_path, new_string: input.new_source }, context);
 } catch {
   // Unparseable input: allow. The deny list in settings.json and the rules still apply.
 }

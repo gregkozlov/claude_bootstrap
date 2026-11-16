@@ -4,7 +4,8 @@
 // 'ask' (exit 0 with a permissionDecision of "ask": the user is prompted). Three parts:
 //   1. the built-in checks, against the installed hook as it stands - they hold whatever the project lists say;
 //   2. the three project lists, against a copy of the hook with known values, in a throwaway git repo in the temp
-//      directory (a frozen file is one git tracks, so the case needs a commit of its own, never one in this tree);
+//      directory (a frozen file is one on the upstream default branch, or with no remote one git tracks, so the
+//      cases need commits and remote refs of their own, never ones in this tree);
 //   3. the same copy with the lists unfilled: a missed fill protects nothing extra and breaks nothing.
 // Add the project's own cases at the marked place: one per entry of its three lists.
 import { spawnSync } from 'node:child_process';
@@ -66,6 +67,22 @@ const builtIn = [
   ['Write .env.local (deny)', 2, write(inRoot('.env.local'))],
   ['Write a key outside the project (deny)', 2, write(home('.ssh', 'id_rsa'))],
   ['Write .env.example (allow)', 0, write(inRoot('.env.example'))],
+  ['Read the maven settings in the home folder (deny)', 2, read(home('.m2', 'settings.xml'))],
+  ['Read the maven security settings (deny)', 2, read(home('.m2', 'settings-security.xml'))],
+  ['Read the gradle properties in the home folder (deny)', 2, read(home('.gradle', 'gradle.properties'))],
+  ["Read the project's gradle properties (allow)", 0, read(inRoot('gradle.properties'))],
+  ['Read the npmrc in the home folder (deny)', 2, read(home('.npmrc'))],
+  ['Read the yarnrc in the home folder (deny)', 2, read(['', 'home', 'dev', '.yarnrc.yml'].join('/'))],
+  ["Read the project's npmrc (allow)", 0, read(inRoot('.npmrc'))],
+  ['Read the NuGet config in AppData (deny)', 2, read(home('AppData', 'Roaming', 'NuGet', 'NuGet.Config'))],
+  ["Read the project's NuGet config (allow)", 0, read(inRoot('NuGet.Config'))],
+  ['Read a kubeconfig file (deny)', 2, read(inRoot('deploy', 'prod.kubeconfig'))],
+  ['Read a kubeconfig yaml (deny)', 2, read(inRoot('kubeconfig-staging.yaml'))],
+  ['Read the kube config in the home folder (deny)', 2, read(home('.kube', 'config'))],
+  ['Read a source file about kubeconfigs (allow)', 0, read(inRoot('pkg', 'kubeconfig', 'kubeconfig.go'))],
+  ['Read a class that loads kubeconfigs (allow)', 0, read(inRoot('src', 'KubeconfigLoader.java'))],
+  ['Read an OAuth client secret (deny)', 2, read(inRoot('client_secret_123.apps.googleusercontent.com.json'))],
+  ['Read the gcloud default credentials (deny)', 2, read(home('.config', 'gcloud', 'application_default_credentials.json'))],
 
   // Secret files from the shell.
   ['cat .env (deny)', 2, bash('cat .env')],
@@ -110,6 +127,29 @@ const builtIn = [
   ['Get-Content with a backslash path (deny)', 2, pwsh(`Get-Content config${BS}.env`)],
   ['cmd /c type with a backslash path (deny)', 2, pwsh(`cmd /c "type config${BS}.env"`)],
   ['sls as Select-String (allow)', 0, pwsh('sls KEY app.log')],
+  ['cat the maven settings (deny)', 2, bash('cat ~/.m2/settings.xml')],
+  ['cat the npmrc in the home folder (deny)', 2, bash('cat ~/.npmrc')],
+  ["cat the project's npmrc (allow)", 0, bash('cat .npmrc')],
+  ['cat a file in the gcloud folder (deny)', 2, bash('cat ~/.config/gcloud/credentials.db')],
+  ['compose config (deny)', 2, bash('docker compose config')],
+  ['compose config behind a file option (deny)', 2, bash('docker compose -f compose.prod.yml config')],
+  ['compose config --services (allow)', 0, bash('docker compose config --services')],
+  ['compose config --volumes (allow)', 0, bash('docker compose -f compose.yml config --volumes')],
+  ['kubectl get secret (ask)', 'ask', bash('kubectl get secret db -o yaml')],
+  ['kubectl describe secrets, byte counts only (allow)', 0, bash('kubectl -n prod describe secrets')],
+  ['kubectl get of a resource list with secrets as json (ask)', 'ask', bash('kubectl get configmap,secret -n prod -o json')],
+  ['kubectl get secret with a jsonpath (ask)', 'ask', bash("kubectl get secret db -o jsonpath='{.data.password}'")],
+  ['kubectl get secrets, names only (allow)', 0, bash('kubectl get secrets -n prod')],
+  ['kubectl get secretstores (allow)', 0, bash('kubectl get secretstores')],
+  ['compose convert (deny)', 2, bash('docker compose convert')],
+  ['compose config over an example env file (allow)', 0, bash('docker compose --env-file .env.example config')],
+  ['compose config over an example and a real env file (deny)', 2, bash('docker compose --env-file .env.example --env-file .env.prod config')],
+  ['node -e reading .env (deny)', 2, bash(`node -e "console.log(require('fs').readFileSync('.env', 'utf8'))"`)],
+  ['python -c reading .env (deny)', 2, bash(`python -c "print(open('.env').read())"`)],
+  ['python -c reading the example file (allow)', 0, bash(`python -c "print(open('.env.example').read())"`)],
+  ['node -e loading dotenv (allow)', 0, bash(`node -e "require('dotenv').config()"`)],
+  ['a .NET ReadAllText of .env (deny)', 2, pwsh(`[IO.File]::ReadAllText('.env')`)],
+  ['a .NET ReadAllLines of a key (deny)', 2, pwsh(`[System.IO.File]::ReadAllLines("certs${BS}server.key")`)],
 
   // Deploys and infrastructure.
   ['kubectl delete (deny)', 2, bash('kubectl -n prod delete pod api-1')],
@@ -160,12 +200,79 @@ const builtIn = [
   ['heroku container:release (deny)', 2, bash('heroku container:release web')],
   ['docker stack deploy behind a context (deny)', 2, bash('docker --context prod stack deploy -c stack.yml api')],
   ['a remote command over ssh (deny)', 2, bash('ssh staging "kubectl scale deploy/api --replicas 0"')],
+  ['kubectl get with a namespace named run (allow)', 0, bash('kubectl get pods -n run')],
+  ['kubectl config use-context (deny)', 2, bash('kubectl config use-context prod')],
+  ['aws get-function of a function named create-order (allow)', 0, bash('aws lambda get-function --function-name create-order')],
+  ['aws write after global options (deny)', 2, bash('aws --region eu-west-1 --profile prod ec2 terminate-instances --instance-ids i-1')],
+  ['skaffold dev, naming the local retry (deny)', 2, bash('skaffold dev'), /--kube-context kind-/],
+  ['export DOCKER_HOST over ssh, then compose up (deny)', 2, bash('export DOCKER_HOST=ssh://prod; docker compose up -d')],
+  ['$env:DOCKER_HOST over ssh, then compose up (deny)', 2, pwsh('$env:DOCKER_HOST = "ssh://prod"; docker compose up -d')],
+  ['export DOCKER_HOST over ssh, then ps (allow)', 0, bash('export DOCKER_HOST=ssh://prod && docker ps')],
+  ['dotnet msbuild deploying on build (deny)', 2, bash('dotnet msbuild /p:DeployOnBuild=true /p:PublishProfile=Production')],
+  ['dotnet msbuild with a folder profile (allow)', 0, bash('dotnet msbuild /p:DeployOnBuild=true /p:PublishProfile=FolderProfile')],
+  ['az acr run (deny)', 2, bash('az acr run -r myreg -f task.yaml .')],
+  ['ssh -T to a git host (allow)', 0, bash('ssh -T git@git.example.org')],
+  ['skaffold dev on a local cluster (allow)', 0, bash('skaffold dev --kube-context minikube')],
+  ['az acr build (deny)', 2, bash('az acr build -r myreg -t api:1 .')],
+  ['docker -H over ssh with compose up (deny)', 2, bash('docker -H ssh://deploy@prod compose up -d')],
+  ['DOCKER_HOST over ssh with compose up (deny)', 2, bash('DOCKER_HOST=ssh://prod docker compose up -d')],
+  ['docker run in a remote context (deny)', 2, bash('docker --context prod run --rm api migrate')],
+  ['docker logs on another host (allow)', 0, bash('docker -H ssh://prod logs api --tail 50')],
+  ['docker compose up in the default context (allow)', 0, bash('docker --context default compose up -d')],
+  ['DOCKER_HOST on localhost (allow)', 0, bash('DOCKER_HOST=tcp://localhost:2375 docker compose up -d')],
+  ['dotnet publish with a publish profile (deny)', 2, pwsh('dotnet publish -c Release -p:PublishProfile=Production')],
+  ['dotnet publish with a web publish method (deny)', 2, bash('dotnet publish /p:WebPublishMethod=MSDeploy')],
+  ['dotnet publish to a folder profile (allow)', 0, pwsh('dotnet publish -p:PublishProfile=FolderProfile')],
+  ['dotnet publish to an output folder (allow)', 0, bash('dotnet publish -c Release -o out')],
+  ['ssh that restarts a service on another host (ask)', 'ask', bash('ssh prod "sudo systemctl restart api"')],
+  ['ssh that reads a log on another host (ask)', 'ask', bash('ssh -i ~/.ssh/deploy.pub deploy@prod cat /var/log/api.log')],
+  ['ssh to localhost (allow)', 0, bash('ssh -p 2222 localhost uptime')],
+  ['scp to another host (ask)', 'ask', bash('scp build/app.jar deploy@prod:/opt/app/')],
+  ['scp from a drive letter to localhost (allow)', 0, pwsh('scp C:/build/app.jar 127.0.0.1:/tmp/')],
+  ['rsync to another host (ask)', 'ask', bash('rsync -avz -e ssh dist/ deploy@prod:/srv/app')],
+  ['rsync between local folders (allow)', 0, bash('rsync -av src/ /tmp/backup/')],
+  ['sftp to another host (ask)', 'ask', bash('sftp -P 2222 deploy@prod')],
 
   // Publishing.
   ['docker push (deny)', 2, bash('docker push registry.local/api:1')],
   ['docker push to a registry on localhost (allow)', 0, bash('docker push localhost:5000/api:dev')],
   ['docker-compose push (deny)', 2, bash('docker-compose push')],
   ['docker build (allow)', 0, bash('docker build -t api .')],
+  ['buildx --push (deny)', 2, bash('docker buildx build --push -t ghcr.io/acme/api .')],
+  ['buildx --push to a registry on localhost (allow)', 0, bash('docker buildx build --push -t localhost:5000/api .')],
+  ['buildx --push to localhost and a remote tag (deny)', 2, bash('docker buildx build --push -t localhost:5000/api -t ghcr.io/acme/api .')],
+  ['gradlew jib (deny)', 2, bash('./gradlew jib')],
+  ['gradlew jib of a subproject (deny)', 2, bash('./gradlew :api:jib')],
+  ['gradlew jibDockerBuild (allow)', 0, bash('./gradlew jibDockerBuild')],
+  ['mvn jib:build (deny)', 2, bash('mvn compile jib:build')],
+  ['mvn jib:dockerBuild (allow)', 0, bash('mvn compile jib:dockerBuild')],
+  ['mvn jib:build to a registry on localhost (allow)', 0, bash('mvn compile jib:build -Dimage=localhost:5000/app')],
+  ['gradlew jib to a registry on localhost (allow)', 0, bash('./gradlew jib -Djib.to.image=localhost:5000/api')],
+  ['crane delete (deny)', 2, bash('crane delete registry.example.com/api:1')],
+  ['crane tag on a registry on localhost (allow)', 0, bash('crane tag localhost:5000/api:1 v2')],
+  ['skopeo sync to a registry (deny)', 2, bash('skopeo sync --src docker --dest docker quay.io/acme/api registry.example.com/mirror')],
+  ['skopeo sync into a folder (allow)', 0, bash('skopeo sync --src docker --dest dir quay.io/acme/api /tmp/mirror')],
+  ['skopeo delete (deny)', 2, bash('skopeo delete docker://quay.io/acme/api:1')],
+  ['buildah manifest push (deny)', 2, bash('buildah manifest push --all api docker://quay.io/acme/api')],
+  ['oras attach (deny)', 2, bash('oras attach registry.example.com/api:1 --artifact-type sig sig.json')],
+  ['oras cp (deny)', 2, bash('oras cp registry.example.com/api:1 ghcr.io/acme/api:1')],
+  ['gradlew bootBuildImage --publishImage (deny)', 2, bash('./gradlew bootBuildImage --publishImage')],
+  ['gradlew bootBuildImage (allow)', 0, bash('./gradlew bootBuildImage')],
+  ['mvnw spring-boot:build-image with publish (deny)', 2, bash('./mvnw spring-boot:build-image -Dspring-boot.build-image.publish=true')],
+  ['mvnw spring-boot:build-image (allow)', 0, bash('./mvnw spring-boot:build-image')],
+  ['ko build (deny)', 2, bash('ko build ./cmd/api')],
+  ['ko build --local (allow)', 0, bash('ko build --local ./cmd/api')],
+  ['ko apply -L (allow)', 0, bash('ko apply -L -f config/')],
+  ['ko resolve into ko.local (allow)', 0, bash('KO_DOCKER_REPO=ko.local ko resolve -f config/')],
+  ['crane push (deny)', 2, bash('crane push api.tar registry.example.com/api:1')],
+  ['crane copy into a registry on localhost (allow)', 0, bash('crane copy registry.example.com/api:1 localhost:5000/api:1')],
+  ['buildah push (deny)', 2, bash('buildah push registry.example.com/api:1')],
+  ['buildah push of a local image to a registry (deny)', 2, bash('buildah push localhost/api docker://quay.io/acme/api')],
+  ['buildah push into the local daemon (allow)', 0, bash('buildah push api docker-daemon:api:dev')],
+  ['skopeo copy to a registry (deny)', 2, bash('skopeo copy docker-archive:api.tar docker://quay.io/acme/api:1')],
+  ['skopeo copy into a local folder (allow)', 0, bash('skopeo copy docker://quay.io/acme/api:1 dir:/tmp/api')],
+  ['oras push (deny)', 2, bash('oras push registry.example.com/api:1 notes.txt')],
+  ['oras push to a registry on localhost (allow)', 0, bash('oras push localhost:5000/api:1 notes.txt')],
   ['compose logs of a service named push (allow)', 0, bash('docker compose logs -f push')],
   ['npm publish (deny)', 2, bash('npm publish')],
   ['npm publish as a dry run (allow)', 0, bash('npm publish --dry-run')],
@@ -281,14 +388,17 @@ function hookWith(values, target) {
 }
 
 let failed = 0;
+let passed = 0;
 function run(part, hook, cases, cwd) {
-  for (const [name, want, payload] of cases) {
+  // An optional fourth element is a pattern the refusal's text must match.
+  for (const [name, want, payload, says] of cases) {
     const input = payload.raw ?? JSON.stringify({ cwd, ...payload });
     const r = spawnSync(process.execPath, [hook], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } });
     const asked = /"permissionDecision":"ask"/.test(r.stdout ?? '');
     const got = r.status === 0 && asked ? 'ask' : r.status === 0 && (r.stdout ?? '').trim() ? 'output' : r.status;
-    const ok = got === want;
-    if (!ok) failed += 1;
+    const ok = got === want && (!says || says.test(r.stderr ?? ''));
+    if (ok) passed += 1;
+    else failed += 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${part} ${name.padEnd(58)} ${String(got).padEnd(4)} ${(r.stderr ?? '').trim().slice(0, 50)}`);
   }
 }
@@ -308,13 +418,29 @@ try {
   writeFileSync(join(migrations, '001_init.sql'), 'create table a (id int);\n');
   writeFileSync(join(project, 'app', 'main.py'), 'x = 1\n');
   const git = (...args) => spawnSync('git', ['-C', project, ...args], { encoding: 'utf8' });
+  const commit = (message) =>
+    git('add', '-A').status === 0 &&
+    git('-c', 'user.name=test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', message).status === 0;
+  // The second commit is a migration the developer committed on the working branch, before any merge.
   const committed =
     git('init', '-q').status === 0 &&
-    git('add', '-A').status === 0 &&
-    git('-c', 'user.name=test', '-c', 'user.email=test@localhost', '-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', 'init').status === 0;
-  // Written after the commit: a migration this task created, which git does not track, and an env file.
+    commit('init') &&
+    (writeFileSync(join(migrations, '004_branch.sql'), 'alter table a add d int;\n'), commit('branch'));
+  // Written after the commits: a migration this task created, which git does not track, and env files - one at the
+  // top, one deeper down, one in a dependency folder no search walks into.
   writeFileSync(join(migrations, '002_task.sql'), 'alter table a add b int;\n');
   writeFileSync(join(project, '.env'), 'KEY=placeholder\n');
+  for (const folder of [['apps', 'api', 'src'], ['lib', 'node_modules', 'pkg']]) mkdirSync(join(project, ...folder), { recursive: true });
+  writeFileSync(join(project, 'apps', 'api', '.env'), 'DATABASE_URL=placeholder\n');
+  writeFileSync(join(project, 'apps', 'api', 'src', 'db.ts'), 'export const url = process.env.DATABASE_URL;\n');
+  writeFileSync(join(project, 'lib', 'node_modules', 'pkg', '.env'), 'KEY=placeholder\n');
+  writeFileSync(join(project, 'lib', 'index.ts'), 'export {};\n');
+  // grep -r reads build output too; and a tree past the walk's cap, with an env file deep down.
+  mkdirSync(join(project, 'tools', 'build'), { recursive: true });
+  writeFileSync(join(project, 'tools', 'build', '.env'), 'KEY=placeholder\n');
+  mkdirSync(join(project, 'big', 'deep', 'er'), { recursive: true });
+  for (let index = 0; index < 60; index += 1) writeFileSync(join(project, 'big', `f${index}.txt`), '\n');
+  writeFileSync(join(project, 'big', 'deep', 'er', '.env'), 'KEY=placeholder\n');
 
   const sample = hookWith(SAMPLE, join(scratch, 'sample.mjs'));
   if (!committed) setupFailed('could not commit in the throwaway repo - is git on PATH?');
@@ -347,8 +473,50 @@ try {
       ['a recursive grep over the source folder (allow)', 0, bash('grep -rn KEY app')],
       ['a recursive grep that excludes the env file (allow)', 0, bash('grep -rn KEY . --exclude=.env')],
       ['git grep, which skips ignored files (allow)', 0, bash('git grep -n KEY')],
+      ['a recursive grep over a folder with an env file deeper down (deny)', 2, bash('grep -rn DATABASE_URL apps')],
+      ['a recursive grep with a count option over it (deny)', 2, bash('grep -rn -m 5 DATABASE_URL apps')],
+      ['an exclude-dir that leaves the env file in (deny)', 2, bash('grep -rn --exclude-dir=node_modules DATABASE_URL .')],
+      ["an exclude-dir that leaves the env file's folder out (allow)", 0, bash('grep -rn --exclude-dir=api DATABASE_URL apps')],
+      ['an include that no secret matches (allow)', 0, bash("grep -rn --include='*.ts' DATABASE_URL apps")],
+      ['an include brace that no secret matches (allow)', 0, bash("grep -rn --include='*.{ts,js}' DATABASE_URL apps")],
+      ['an include that matches the env file (deny)', 2, bash("grep -rn --include='.e*' DATABASE_URL apps")],
+      ['a recursive grep over an env file in node_modules only (allow)', 0, bash('grep -rn KEY lib')],
+      ['Edit a migration committed on the branch, no remote (deny)', 2, edit(join(migrations, '004_branch.sql'))],
+      ['a recursive grep reads build output too (deny)', 2, bash('grep -rn KEY tools')],
+      ['an exclude-dir that names the build folder (allow)', 0, bash('grep -rn --exclude-dir=build KEY tools')],
     ], project);
   }
+
+  // The same copy with a walk cap of 50 entries: past it the tree is unknown, and the user is asked.
+  const capped = sample && join(scratch, 'capped.mjs');
+  const cappedText = sample && readFileSync(sample, 'utf8').replace(/const WALK_CAP = \d+;/, 'const WALK_CAP = 50;');
+  if (capped && cappedText.includes('const WALK_CAP = 50;')) {
+    writeFileSync(capped, cappedText);
+    run('2', capped, [
+      ['a recursive grep over a tree past the cap (ask)', 'ask', bash('grep -rn KEY big')],
+      ['a recursive grep over a small tree, cap or not (allow)', 0, bash('grep -rn KEY app')],
+    ], project);
+  } else if (sample) setupFailed('backend-guard.mjs no longer carries const WALK_CAP');
+
+  // The upstream default branch decides: origin/main holds the first commit only.
+  if (sample && committed && git('update-ref', 'refs/remotes/origin/main', 'HEAD~1').status === 0) {
+    run('2', sample, [
+      ['Edit a migration merged upstream (deny)', 2, edit(join(migrations, '001_init.sql'))],
+      ['Edit a migration committed on the branch only (allow)', 0, edit(join(migrations, '004_branch.sql'))],
+      ['rm a migration committed on the branch only (allow)', 0, bash('rm db/migrations/004_branch.sql')],
+      ['rm -rf a folder with a merged migration (deny)', 2, bash('rm -rf db/migrations')],
+    ], project);
+  } else if (committed) setupFailed('could not set origin/main in the throwaway repo');
+
+  // origin/HEAD outranks origin/main: here it names a branch that holds the second commit too.
+  if (
+    sample &&
+    committed &&
+    git('update-ref', 'refs/remotes/origin/develop', 'HEAD').status === 0 &&
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop').status === 0
+  ) {
+    run('2', sample, [['Edit a migration on the branch origin/HEAD names (deny)', 2, edit(join(migrations, '004_branch.sql'))]], project);
+  } else if (committed) setupFailed('could not set origin/HEAD in the throwaway repo');
 
   const unfilled = hookWith(UNFILLED, join(scratch, 'unfilled.mjs'));
   if (committed && unfilled) {
@@ -364,4 +532,5 @@ try {
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
+console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

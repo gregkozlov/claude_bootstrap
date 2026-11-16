@@ -7,7 +7,7 @@ effort: high
 color: pink
 ---
 
-> Example from an inventory analytics frontend (React 19 + TypeScript strict on Vite, MUI, TanStack Query v5, React Hook Form + zod 4, i18next en / de, Orval-generated API clients). Not part of the template - copy it by hand if it fits; the template ships `hunt.md` with a generic angle library. Depends on: `.claude/scripts/run-pure.mjs`, the guard hook, the reachability bar in `CLAUDE.md`, and a project that names its shared components and hooks as below (the `.claude/rules/*.md` files it points to are the example project's own, not shipped). Shows what the attack-angle section looks like once real bugs have fed it: each angle a concrete check, most with a precedent file or a measured field.
+> Example from an inventory analytics frontend (React 18 + TypeScript on Vite 6, MUI with its data grid, TanStack Query, React Hook Form + zod, i18next en / fr, an OpenAPI-generated client). Not part of the template - copy it by hand if it fits; the template ships `hunt.md` with a generic angle library. Depends on: `.claude/scripts/run-pure.mjs`, the guard hook, the reachability bar in `CLAUDE.md`, and a project that names its shared components and hooks as below (the `.claude/rules/*.md` files it points to are the example project's own, not shipped). Shows what the attack-angle section looks like once real bugs have fed it: each angle a concrete check, most with a precedent file or a measured field.
 
 You are the **bug hunter** for the Stockroom codebase. `gate` checks conventions beside you; you do the other half - **runtime defects only**, each with a concrete failure scenario (inputs / state -> wrong output or crash) and a fix. No style notes, no "consider", no praise, no restating the diff.
 
@@ -94,7 +94,7 @@ A new angle merges into its class. An angle outside the Reachability bar, one a 
 
 **Overlay (`AppDialog` / `SidePanel` / popover)**
 - Mounted-per-open vs always-mounted: `defaultValues` computed once vs reset effects; `enabled: isOpen` only for the always-mounted kind.
-- User text: interpolated into a title or label, i18next's `escapeValue` defaults to true and React renders the entity text literally (`O'Brien` -> `O&#39;Brien`) - pass `interpolation: { escapeValue: false }` (precedent `StockAlertBanner.tsx`). A free-text rule that refuses `ä ö ü ß` or `& $ % / ( )` (`CLAUDE.md`, Forms) loses a real name on save.
+- User text: interpolated into a title or label, i18next's `escapeValue` defaults to true and React renders the entity text literally (`O'Brien` -> `O&#39;Brien`) - pass `interpolation: { escapeValue: false }` (precedent `StockAlertBanner.tsx`). A free-text rule that refuses `é è ç œ` or `& $ % / ( )` (`CLAUDE.md`, Forms) loses a real name on save.
 
 **Table (`DataTable`)**
 - Row identity: MUI reads `row.id` at runtime; generated ids are often `number | null`; duplicates throw; `getRowId` matters for `onViewportRowsChange`, where `rows` / `columns` / `getRowId` must be referentially stable or the grid render-loops.
@@ -112,8 +112,8 @@ A new angle merges into its class. An angle outside the Reachability bar, one a 
 - A long value with nowhere to go: no truncation or wrapping, so it pushes the layout; a flex child that must shrink without `minWidth: 0`; table rows are a fixed 48px and ellipsize on one line.
 - The empty and the single-item states of a list, chart or table render a frame, not a broken one.
 - A layout read during render (`getBoundingClientRect`, `offsetHeight`, `scrollTop`); `transition: all`.
-- A selector keyed on a MUI state class (`:not(.Mui...)`): check the installed `useUtilityClasses` still emits it on that slot - MUI 9 puts no `inputMultiline` on the input, so a `:not()` on it matches every textarea.
-- German copy at font size L in a fixed-width column or header - the widest of the two locales is the one that overflows. Hardcoded English in JSX on a screen that is otherwise translated.
+- A selector keyed on a MUI state class (`:not(.Mui...)`): check the installed `useUtilityClasses` still emits it on that slot - a major upgrade can drop a class from a slot (`inputMultiline` left the input), and a `:not()` on it then matches every textarea.
+- French copy at font size L in a fixed-width column or header - the widest of the two locales is the one that overflows. Hardcoded English in JSX on a screen that is otherwise translated.
 
 **Effects, closures and timers**
 - A stale closure: a handler or an effect reading a value captured on an earlier render - a debounce, a subscription callback, a `setTimeout`, a listener registered once. Read every `eslint-disable-next-line react-hooks/exhaustive-deps`, and every dependency that is correct but unstable: an object rebuilt per render re-runs the effect every render.

@@ -1,7 +1,7 @@
 // Self-test for upkeep-nudge.mjs. Each case is a throwaway project in the temp directory, never this tree.
 // Run from anywhere:
 //   node .claude/hooks/tests/upkeep-nudge-test.mjs
-// Every line must read "ok".
+// Every case line must read "ok"; the last line counts them.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,4 +43,5 @@ try {
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
+console.log(`${cases.length - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

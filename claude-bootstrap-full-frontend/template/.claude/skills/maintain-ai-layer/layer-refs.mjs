@@ -5,7 +5,8 @@
 //
 //   node .claude/skills/maintain-ai-layer/layer-refs.mjs [file-or-dir ...]
 //
-// No arguments: CLAUDE.md, CLAUDE.local.md and every tracked or unignored *.md. With arguments: only those
+// No arguments: CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, every *.md under .claude/ on disk (sessions
+// skipped) and every tracked or unignored *.md. With arguments: only those
 // (a directory is scanned for *.md one level deep - the memory folder, say).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -18,7 +19,7 @@ const BUILT_IN_AGENTS = new Set(['Explore', 'Plan', 'general-purpose', 'claude-c
 const PREFIXES = ['<SRC_DIR>/', '.claude/'];
 const SUFFIXES = ['', '.ts', '.tsx', '.mjs', '.js', '.json', '.md', '/index.ts', '/index.tsx'];
 
-const git = (...args) => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8' });
+const git = (...args) => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
 const targets = () => {
   const args = process.argv.slice(2);
@@ -26,8 +27,16 @@ const targets = () => {
     const tracked = git('ls-files', '--cached', '--others', '--exclude-standard', '*.md')
       .split('\n')
       .filter((f) => f && !f.includes('node_modules/'));
-    const local = fs.existsSync(path.join(ROOT, 'CLAUDE.local.md')) ? ['CLAUDE.local.md'] : [];
-    return [...new Set([...tracked, ...local])].map((f) => path.join(ROOT, f)).filter((f) => fs.existsSync(f));
+    // A personal install keeps .claude/ out of the project's git, so the layer is read from disk.
+    const fromDisk = (dir) =>
+      fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) return ['node_modules', '.git'].includes(entry.name) || rel === '.claude/sessions' ? [] : fromDisk(rel);
+        return entry.name.endsWith('.md') ? [rel] : [];
+      });
+    const layer = fs.existsSync(path.join(ROOT, '.claude')) ? fromDisk('.claude') : [];
+    const roots = ['CLAUDE.md', '.claude/CLAUDE.md', 'CLAUDE.local.md'];
+    return [...new Set([...roots, ...layer, ...tracked])].map((f) => path.join(ROOT, f)).filter((f) => fs.existsSync(f));
   }
   return args.flatMap((arg) => {
     const full = path.resolve(ROOT, arg);
@@ -49,7 +58,7 @@ const scripts = fs.existsSync(manifest) ? new Set(Object.keys(JSON.parse(fs.read
 const onDisk = (ref) => SUFFIXES.some((suffix) => fs.existsSync(path.join(ROOT, ref.replace(/\/$/, '') + suffix)));
 // A gitignored path (a session folder, settings.local.json, a waiver) exists per machine or per run, not in the repo.
 // Under .claude/ only the known personal paths count: a deny-by-default `.claude/*` block ignores every typo there.
-const LOCAL_ONLY = /^\.claude\/sessions(?:\/|$)|^\.claude\/(?:settings\.local\.json|handoff\.md|\.last-maintain)$|^CLAUDE\.local\.md$/;
+const LOCAL_ONLY = /^\.claude\/sessions(?:\/|$)|^\.claude\/(?:settings\.local\.json|handoff\.md|\.last-maintain|CLAUDE\.md)$|^CLAUDE\.local\.md$/;
 const ignored = (ref) => {
   try {
     execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', '--no-index', ref], { stdio: 'ignore' });
@@ -73,7 +82,8 @@ const cleanPath = (span) => {
 };
 
 let total = 0;
-for (const file of targets()) {
+const files = targets();
+for (const file of files) {
   const rel = path.relative(ROOT, file).split(path.sep).join('/');
   const problems = [];
   fs.readFileSync(file, 'utf8')
@@ -98,4 +108,4 @@ for (const file of targets()) {
     total += problems.length;
   }
 }
-console.log(`layer-refs: ${total} unresolved references`);
+console.log(`layer-refs: ${files.length} files, ${total} unresolved references`);

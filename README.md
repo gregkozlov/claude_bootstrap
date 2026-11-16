@@ -1,17 +1,37 @@
 # Claude Code bootstraps
 
-Three working layers for [Claude Code](https://docs.claude.com/en/docs/claude-code/overview): a `CLAUDE.md`, agents, skills and hooks that give every task the same lifecycle, review and guard rails. The folder name says what a layer is for: `full-frontend` and `light-frontend` are written for a codebase with a UI - their review angles, their reachability bar and their examples are a browser's; `light-backend` is the light layer retargeted at a server codebase in any language. Unpack this repository outside your project, paste one prompt into Claude Code in the project, and the model installs the layer by following the folder's `INSTALL.md`; `/maintain-ai-layer init` then fills the project-specific parts by reading the repo.
+Three ready-made working layers for [Claude Code](https://code.claude.com/docs): a `CLAUDE.md`, agents, skills and hooks that give every task the same lifecycle, review and guard rails. Pick one, install it with one prompt, and Claude Code follows it in your project from the next session on.
 
-| | `claude-bootstrap-full-frontend` | `claude-bootstrap-light-frontend` | `claude-bootstrap-light-backend` |
+> [!IMPORTANT]
+> **Install in three steps:**
+> 1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it **outside** your project.
+> 2. Start Claude Code in your project on **Opus at high effort**: `claude --model opus --effort high --add-dir <path to the chosen folder>`.
+> 3. Paste the install prompt from the **top of the chosen folder's `README.md`**. When it is done, restart Claude Code and run `/maintain-ai-layer init`.
+
+## Which one
+
+| Your project | Take |
+| --- | --- |
+| A web UI, on a ~20 USD plan | [`claude-bootstrap-light-frontend`](claude-bootstrap-light-frontend/README.md) |
+| A service, an API or a worker, in any language | [`claude-bootstrap-light-backend`](claude-bootstrap-light-backend/README.md) |
+| A web UI, on a plan where review depth matters more than tokens (Max) | [`claude-bootstrap-full-frontend`](claude-bootstrap-full-frontend/README.md) |
+| A UI and a server in one repo | the one that matches where the risk is - one layer per repo, never two |
+| A mobile app, a library, a CLI, a data or infra repo | not designed for; light-backend is the closest fit - after `init`, rewrite its reachability bar's entry points (endpoint, consumer, job) to your public API or commands |
+
+## How they differ
+
+| | full-frontend | light-frontend | light-backend |
 | --- | --- | --- | --- |
-| Built for | a UI codebase, on a budget where review depth matters more than tokens | a UI codebase on a small plan, where every turn and every subagent is counted | a service, a worker or an API in any language, on the same small plan |
-| Lifecycle | nine steps; steps 3-9 in a `lifecycle` skill | six steps, all in `CLAUDE.md` | the same six; a contract is an endpoint, a schema, a payload or a config key, and the changed path is exercised locally |
-| Review | a ladder by triggers: `gate`, then `hunt`, then `drift`, plus `twins` and `comments` | one reviewer, `hunt`, on the plan and on the diff, plus `drift` on the docs when a doc names what changed or a bug was fixed | the same two agents; `hunt`'s angles are a server's - authorization, transactions and concurrency, schema and stored data, queries and load, contracts with callers |
-| Reachability bar | a defect counts only when one user, in one tab, at human speed, reaches it through the interface; what is out of scope is neither coded for nor reported | the same bar | a server's bar: a real caller through the service's own entry points - two requests at once, a retry and hostile input are always in; a dependency outside its contract and data no code path can produce are out |
-| Hooks | `guard`, a Stop hook running the check command, session pointers, an upkeep reminder | `guard`, an upkeep reminder | `guard`, an upkeep reminder, and `backend-guard`: it refuses secret files, edits of committed migrations and commands that deploy or publish, and asks the user before a command that destroys data |
-| Extras | session artifact folders, rule-reach measurement, a browser-check ritual, periodic upkeep of the layer | the same upkeep modes (`maintain-ai-layer`: a cheap `weekly` with `drift` on the hotspots only, `deep` and `rules` on request), rule reach measured with git; each dropped part is named in its README | the light frontend layer's, plus standing rules for data, secrets and the outside world, a `debug` skill that follows a request to its response, and the project's own test convention in `CLAUDE.md` |
-| After the install | `/maintain-ai-layer init` - the project sections of `CLAUDE.md`, the rules, the units tuned | the same `init`, with the same thorough survey | `init` with a survey of data and configuration added; it reads the repo, runs only the project's check command, and asks once where the local env file points |
-| `CLAUDE.md` budget | 32 KB | 20 KB | 20 KB |
-| Install | download, then paste the prompt from `claude-bootstrap-full-frontend/README.md` | download, then paste the prompt from `claude-bootstrap-light-frontend/README.md` | download, then paste the prompt from `claude-bootstrap-light-backend/README.md` |
+| Lifecycle | nine steps, steps 3-9 in a skill | six steps, all in `CLAUDE.md` | the same six; the changed path is exercised locally |
+| Review | graded review, tiers 0-3, by up to five agents, four of them on Opus | one reviewer, `hunt`, on the plan and the diff; `drift` when a doc names what changed; on Sonnet | the same two agents with a server's attack angles |
+| Agent launches per task | 0 for a trivial edit, usually 3-6 by review tier, at most 9 | 0 for a trivial edit, usually 1-2, at most 5 | 0 for a trivial edit, usually 1-2, at most 5 |
+| Hooks | `guard`, a Stop hook running your check command, session pointers, a monthly upkeep reminder | `guard`, the upkeep reminder | `guard`, the upkeep reminder, and `backend-guard`: no secrets, no edits of merged migrations, no deploys, a question before data is destroyed |
+| Always-on `CLAUDE.md` | about 15 KB | about 12 KB | about 18 KB with its `[fill]` prompts |
 
-Each folder's own `README.md` is the manual: what the layer does, the install prompt, what is left to fill, and how to prove it works. The same prompt updates a layer installed from an older version. All three need Node 18+ and git - the hooks are Node scripts, whatever language the project is written in; the full layer's rule-reach script needs Node 22.5+ or 20.17+. One layer per repo, never two.
+Each folder's `README.md` is its manual: the install prompt, what it costs, what to do when a hook stops you, and how to check it works.
+
+> [!TIP]
+> **Where the layer lives** - the install asks first. **Own repo** (recommended): the whole layer in `.claude/`, kept out of the project's git and versioned in a private repo of your own. **Personal**: the same without a repo. **Team**: committed with the project - then its rules (no commits, no branch switches, no long dashes) apply to everyone who uses Claude Code there, so agree it with the team first. Any other arrangement: just say it in your own words.
+
+> [!NOTE]
+> **All three need** Node 18+ (the hooks are Node scripts, whatever language the project is written in), git, and Git Bash on Windows. The full layer's rule-reach script needs Node 20.17+ or 22.5+.

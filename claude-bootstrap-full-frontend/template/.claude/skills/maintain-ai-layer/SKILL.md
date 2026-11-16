@@ -1,7 +1,7 @@
 ---
 name: maintain-ai-layer
-description: Upkeep of the AI layer against the current code - weekly (default) or deep; rules rebuilds the rule set; init writes the project sections of CLAUDE.md, the rules and the unit tuning after an install. Use on "/maintain-ai-layer", "maintain the AI layer", "audit the layer", "optimize the rules", "fill the layer for this project".
-argument-hint: '[weekly | deep | rules | init]'
+description: Upkeep of the AI layer against the current code - deep (default, about once a month); rules rebuilds the rule set; init writes the project sections of CLAUDE.md, the rules and the unit tuning after an install. Use on "/maintain-ai-layer", "maintain the AI layer", "audit the layer", "optimize the rules", "fill the layer for this project".
+argument-hint: '[deep | rules | init]'
 ---
 
 # maintain-ai-layer
@@ -10,14 +10,15 @@ The AI layer rots quietly: a file moves and a rule still names it, a count grows
 
 ## Mode
 
-The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`weekly`, `deep`, `rules`, `init`; an alias reads its mode's file): read that file before the first step, and only the other references it names (`deep` and `rules` run steps of `weekly.md`, `deep` and `init` run steps of `rules.md`), plus `settled.md` (Standing rules).
+The argument picks the mode, and the first line of the reply names it. Each mode's steps live in `references/<mode>.md` (`deep`, `rules`, `init`; an alias reads its mode's file): read that file before the first step, and only the other references it names (`rules` runs steps of `deep.md`, `deep` and `init` run steps of `rules.md`), plus `settled.md` (Standing rules).
 
-- **`weekly`** (also `weekly-maintenance`, and the default with no argument) - the whole layer, shallow: every mechanical check, the counts, rule loading, and a semantic `drift` pass on the three rules the last 30 days of code reached most and at most two `CLAUDE.md` sections. Run it about once a month - the mode keeps its name, the reminder sets the pace.
-- **`deep`** (also `deep-audit`) - everything `weekly` does, then a `drift` fact-check of every layer file, the `rules` reach, split and code-sweep steps, cross-file consistency, the hooks and the memory.
+- **`deep`** (also `deep-audit`, and the default with no argument) - the whole layer: every mechanical check (dead references, globs matching nothing, the counts, always-on bytes), rule loading, then a `drift` fact-check of every layer file, the `rules` reach, split and code-sweep steps, cross-file consistency, the hooks and the memory. Run it about once a month - the session-start reminder asks for it after 30 days.
 - **`rules`** - the rule set alone, in depth: every rule checked against the code, `paths:` over- and under-reach, a rule whose sections serve different files split, new rules from a sweep of the code and its fix history, stale ones corrected or deleted. With no project rule, it builds the set from the whole project. Run it after a large code change, or when rule text per file climbs.
 - **`init`** - the project-specific parts, from a survey of the repo: the `[fill]` sections of `CLAUDE.md`, the rule set built or updated and enriched, and the units tuned to the project. Run it once right after the install, and again whenever the project has moved on; a second run updates, it never rebuilds. `rules` touches the rules alone, `deep` audits the layer as it stands.
 
 ## Standing rules (all modes)
+
+**`CLAUDE.md` in this skill means the layer's file - the one with the `Layer tracking` line** (`grep -l "Layer tracking" CLAUDE.md .claude/CLAUDE.md`): the root file in a team layer, the one inside `.claude/` in a personal one. Every command below that names `CLAUDE.md` runs on that file.
 
 **This skill applies what it verified itself**, with no approval round: every stale fact, dead line, misplaced text and glob change goes in once it has been checked against the code. These limits still hold, because they come from `CLAUDE.md` and this skill cannot lift them:
 
@@ -27,15 +28,16 @@ The argument picks the mode, and the first line of the reply names it. Each mode
 - **The code is not the doc's servant.** When code violates a policy in several places, the policy is rewritten only if `git log` shows a deliberate move away from it. Otherwise it is a code finding for the report, and this skill never fixes it.
 - **Settled is settled.** `.claude/docs/decisions.md` and the "settled and deliberate" items in `CLAUDE.md` are not reopened. A finding against one goes to the report as a note about the decision, not a defect. Findings earlier runs settled are in `references/settled.md`: every agent prompt carries that list, a matching finding is logged as settled and not reported, and the run appends each new owner answer and each accepted rejection to it.
 - **Never edited, only reported:** `.claude/hooks/**` code and `.claude/settings*.json`, the generated and protected paths (`<GENERATED_PATHS>`), `.claude/docs/decisions.md`, the project's backlog. Memory files other than the `MEMORY.md` index are rewritten or deleted only after the owner confirms.
-- **The layer is team-shared.** A personal preference never goes into `CLAUDE.md` or a rule: it goes to `CLAUDE.local.md`, or into the report as a suggestion.
-- **Edits use Edit / Write only.** No commits, and plain hyphens. If the branch is not the default one, say so before the first edit - an AI-layer edit riding on a feature branch is the owner's call. If the auto-mode classifier refuses a `.claude/` edit, ask the owner for a grant and retry. Never route the edit through another tool.
+- **A team layer is team-shared** (`Layer tracking: team`). A personal preference never goes into its `CLAUDE.md` or a rule: it goes to `CLAUDE.local.md`, or into the report as a suggestion. A personal layer is the owner's alone, and no tracked file of the project is edited from it.
+- **The Grep tool misses files when its `path` is `.claude` itself** - ripgrep misapplies the `.claude/*` ignore-plus-negation lines at that root, so a zero- or low-hit answer there proves nothing. Search `.claude` from the repo root with `glob: '.claude/**'`, or pass a subfolder (`.claude/agents`).
+- **Edits use Edit / Write only.** No commits, and plain hyphens. In a team layer, if the branch is not the default one, say so before the first edit - an AI-layer edit riding on a feature branch is the owner's call. If the auto-mode classifier refuses a `.claude/` edit, ask the owner for a grant and retry. Never route the edit through another tool.
 - **Record the run.** Open `task-ai-layer-<mode>.md` in this session's artifact folder. It holds the mode, the baseline numbers, every finding with its decision (applied, rejected with the reason, reported), and the numbers after. Every agent prompt names the files it may read and carries the list of decisions already taken in this run.
-- **Stamp the run.** A `weekly`, `deep` or `init` run in the main tree ends by writing today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`; `upkeep-nudge.mjs` reads it at session start and asks for the next pass after 30 days. `rules` does not stamp.
-- **Every agent this skill launches runs on Sonnet; the main thread stays on the model the user picked.** Pass `model: "sonnet"` on each `Agent` call and no `effort`: the tool takes one only on an explicit request, and this skill makes none, so `drift` keeps its frontmatter `effort: high`, and the built-in `Explore`, which has no frontmatter, runs at its usual effort.
+- **Stamp the run.** A `deep` or `init` run in the main tree ends by writing today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`; `upkeep-nudge.mjs` reads it at session start and asks for the next pass after 30 days. `rules` does not stamp.
+- **Every agent this skill launches runs on Sonnet; the main thread stays on the model the user picked.** Pass `model: "sonnet"` on each `Agent` call and no `effort`: the tool takes one only on an explicit request, and this skill makes none, so `drift` keeps its frontmatter `effort: high`, and the built-in `Explore`, which has no frontmatter, runs at its usual effort. This is the one stated exception to "every agent runs on its frontmatter model": an upkeep run launches dozens of agents that fact-check text rather than hunt defects in a diff, so breadth matters more than depth, and saying so here keeps it from being a quiet downgrade.
 
 ## Report
 
-The `weekly`, `deep` and `rules` report is in the user's language and says (`init` writes the report its own file names):
+The `deep` and `rules` report is in the user's language and says (`init` writes the report its own file names):
 
 1. **Mode and what ran** - each agent type with its count (for example: `drift` x31 in 4 waves, `Explore` x4), and every step skipped, with the reason.
 2. **Numbers, before -> after** - a table with: `CLAUDE.md` bytes; the rule count and total rule bytes; the rules-reach median, top-decile and max; files over 30 KB; `layer-refs` unresolved; the `--check` result; `<CHECK_COMMAND>`.

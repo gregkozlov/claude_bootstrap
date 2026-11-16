@@ -35,7 +35,7 @@ Owned by another team, the backend or the deploy; this repo cannot fix them.
 - **`GET /suppliers/{id}/lead-times` counts calendar days, not working days.** Converting would need each supplier's holiday calendar, which no endpoint exposes. `LeadTimeChart` labels its axis "calendar days" so the number is not misread.
 - **`GET /orders/summary` silently ignores an unknown `sortDir`.** Rejecting it is backend validation work. The frontend sends only the typed `'asc' | 'desc'` union, so no call site can hit it today.
 - **Open-ended validity stays the `9999-12-31` sentinel.** Replacing it with `null` is a contract change on every endpoint that carries `validTo`. The frontend maps it once, in `toValidity`, and renders "open-ended".
-- **Cache headers on `index.html` belong to the deploy.** The web server config that sends `no-cache` for `index.html` and long-lived headers for hashed assets is built by the backend team with the image. A stale-shell report goes to them, not into a service worker here.
+- **Cache headers on `index.html` belong to the hosting.** The headers that keep `index.html` fresh and cache hashed assets for long are set where the app is served, outside this repo. A stale-shell report goes to whoever runs the hosting, not into a service worker here.
 
 ## Rejected fixes and disproven claims
 

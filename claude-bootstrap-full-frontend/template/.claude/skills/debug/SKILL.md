@@ -1,6 +1,6 @@
 ---
 name: debug
-description: The procedure for every bug report. Load it before touching code - a screenshot, "it does not work", "why does it", "find out why", a console error, a wrong number, "/debug".
+description: The procedure for every defect report. Load it before touching code - "is broken", "does not work", a wrong value, an error or console error, a screenshot of a fault, "/debug".
 ---
 
 # debug
@@ -20,6 +20,7 @@ Run the `verify-live` skill on the surface with the user's inputs and data. The 
 - Reproduced: keep the exact steps, they are the proof in phase 4.
 - **Intermittent** (it shows on some loads, not on others): repeat the trigger under the same conditions before any diagnosis and write the rate into the task file (`3 of 10 loads`); only then change one variable per run. The phase-4 re-run (lifecycle step 6) repeats the same number of tries - one clean try of a bug seen in three of ten proves nothing.
 - Not reproducible on the data you can reach (a tenant, a permission, a day with no data): say so, name what would be needed, and offer instrumentation or a targeted question instead of a fix. **No fix ships for a bug nobody has seen.**
+- **`Browser check: off`** (`CLAUDE.md`): the user's own screenshot, console or network paste is the observation; the fix is proved by the phase-2 pure-part run before and after, and the user confirms the result once.
 - **No server listening for this tree**: phase 0 and the static half of phase 2 still run, then the turn ends asking the owner to start one - no named cause, no fix.
 - Not visible in a browser at all (a build, a script, a type): the reproduction is the command and its output.
 

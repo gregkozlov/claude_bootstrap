@@ -7,7 +7,7 @@ description: Write this session's handoff.md into its artifact folder before a /
 
 A `/compact` keeps a summary of this chat; a new session keeps nothing. This skill writes the one file that makes either continuation cheap: `handoff.md` in **this session's own artifact folder**, **in the project's own language** (`CLAUDE.md`, Working Principles) - its reader is the model, not the user - with every fact the next session would otherwise have to rediscover or ask for. The user's own words are quoted verbatim in whatever language they were said, a long dash written as a hyphen (the guard refuses the dash in any project file).
 
-**The file is the deliverable.** It is temporary and personal (`.claude/sessions/` is gitignored), read in full by whoever picks the work up, and the owner prunes the folders by hand. **Nothing picks it up automatically** - no hook, no memory line: several sessions can run in the same tree at once, and a handoff belongs to one task, not to whoever starts next. The user names the folder in the session that should read it, which is why section 4 below ends by printing that sentence.
+**The file is the deliverable.** It is temporary and personal (`.claude/sessions/` is ignored by git), read in full by whoever picks the work up, and the owner prunes the folders by hand. **Nothing picks it up automatically** - no hook, no memory line: several sessions can run in the same tree at once, and a handoff belongs to one task, not to whoever starts next. The user names the folder in the session that should read it, which is why section 4 below ends by printing that sentence.
 
 ## 1. Collect the facts - by command, not from memory
 
@@ -35,7 +35,7 @@ Then walk the whole conversation, oldest message first, and pull out:
 
 ## 2. Write the file
 
-Path: `handoff.md` in this session's own artifact folder (the SessionStart hook names it; create it if missing). One handoff per folder however many days the task spans - rewrite it in place. Write tool, English, identifiers and paths as-is.
+Path: `handoff.md` in this session's own artifact folder (the SessionStart hook names it; create it if missing). One handoff per folder however many days the task spans - rewrite it in place. Write tool, the project's language, identifiers and paths as-is.
 
 Fixed section order; keep every section even when it says "none":
 

@@ -14,7 +14,7 @@ The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "
 
 ## R1. Baseline
 
-`references/weekly.md` steps 1 and 2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source directory: the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
+`references/deep.md` M1 and M2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source directory: the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
 
 **No project rule** - no `.claude/rules/*.md`, or none whose reach holds a file outside `.claude/` - sends the run to R7; R2-R5 have nothing to work on.
 
@@ -68,7 +68,7 @@ It lands as a line or a paragraph in the rule whose `paths:` reach those files, 
 
 ## R6. Verify
 
-The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c CLAUDE.md`, against R1. Then `references/weekly.md` step 6, without the stamp: `rules` does not stamp.
+The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c` of the layer's `CLAUDE.md`, against R1. Then `references/deep.md` D7, without the stamp: `rules` does not stamp.
 
 ## R7. No project rule: build the set
 

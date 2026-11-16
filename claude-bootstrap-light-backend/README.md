@@ -1,72 +1,140 @@
 # Claude Code working layer - light, for a backend
 
-The light layer of `../claude-bootstrap-light-frontend`, retargeted at a **server codebase in any language**: an HTTP or RPC service, a worker, a job runner - Python, Go, Java, C#, PHP, Ruby, Rust, Node. Same budget and the same shape: built for a **20 dollar plan**, one lifecycle, **at most three agent launches per task** - `hunt` on the plan and on the diff, `drift` on the docs only when a doc names what changed or a bug was fixed (plus a scoped second `hunt` round when a fix is itself non-trivial, and an `Explore` when step 1 has to sweep an unfamiliar area) - and a `CLAUDE.md` held under 20 KB because it is paid for on every turn. What changes is what the layer is afraid of: not a stale closure or a form that loses its input, but a dropped table, an edited migration, a leaked key, a request that two callers send at once.
+A working layer for Claude Code - rules, two review agents and guard hooks - for a server codebase in any language (Java, .NET, Python, Node, Go and the rest), sized for a ~20 USD plan.
 
-```
-README.md      this file
-INSTALL.md     the install and update procedure - read by the model, not copied into the project
-template/      what a project receives (CLAUDE.md, .claude/*)
-```
-
-**It needs Node 18+ and git on the path, whatever the service is written in**: the hooks are Node scripts with no dependencies. A repo that holds both a server and a UI takes the layer that matches where the risk is; never two layers in one repo.
-
-## Install
-
-1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-light-backend`.
-2. Open Claude Code in your project, preferably on Opus at high effort (`claude --model opus --effort high`, or `/model opus` and `/effort high` in a running session): the install reads your repo and merges with whatever Claude config you already have. It is a one-off cost; the layer runs cheap afterwards.
-3. Paste the prompt below with the path filled in. If Claude Code asks to read the unpacked folder, allow it (or add it first with `/add-dir <path>`).
-4. When it is done, restart Claude Code and run `/maintain-ai-layer init`: it writes the project sections of `CLAUDE.md`, builds the path-scoped rules from your code and tunes `hunt` to the project.
-
-The same prompt updates a layer installed from an older version of this bootstrap. Neither the install nor `init` starts your service, applies a migration or reads an env file; each runs your check command once, and only when the database or containers it needs are already up.
+> [!IMPORTANT]
+> Run the prompt below in Claude Code on Opus at high effort: `claude --model opus --effort high`, or `/model opus` and then `/effort high` in a running session. Allow the bootstrap folder when Claude Code asks, or add it first with `/add-dir <path to this folder>`.
 
 ```text
-Integrate the Claude Code working layer I unpacked at <path to claude-bootstrap-light-backend> into this project.
+Integrate the Claude Code working layer I unpacked at <path to this folder> into this project.
 
-1. Read <path>/INSTALL.md first and follow it - it covers a first install and an update of a layer installed earlier.
+1. Read INSTALL.md in that folder first and follow it - it covers a first install and an update of a layer installed earlier.
 2. Never overwrite what this project already has (CLAUDE.md, AGENTS.md, anything under .claude/): merge it, and say what happened to each file.
 3. Read every value the layer needs from this repo; ask me in chat only what the repo cannot answer.
 4. Change files only - no commits, no pushes, no migration applied, no service started.
 5. Finish with the report INSTALL.md asks for, then tell me to restart Claude Code and run /maintain-ai-layer init.
 ```
 
-## What is in it
+> [!NOTE]
+> **Requirements**
+> - **Claude Code**, a release recent enough to know the `PowerShell` tool and to read `effort:` in agent frontmatter: the hooks and the agents rely on both.
+> - **Node 18 or newer** on the PATH, whatever the service is written in. The hooks are Node scripts: without `node` on PATH they do not run.
+> - **git** on the PATH.
+> - **On Windows, Git Bash**: the command blocks in `INSTALL.md` are bash.
 
-- **One lifecycle, six steps** (`CLAUDE.md`, Development Workflow): classify, the consumer walk plus a plan review, implement and exercise the changed path once, one review pass, the docs check, close with what stays unverified, what was decided on the user's behalf, what the owner must do by hand (apply a migration, set a variable) and three suggested commit subjects. A **contract change** - an endpoint, a schema, a message payload, a config key - goes through plan mode, and its consumer list names the callers the repo cannot show. Bug reports enter through the `debug` skill.
-- **Four standing rules a server needs** (`CLAUDE.md`, Data, secrets and the outside world): the agent edits code anywhere, but what it **runs** reaches only this machine - localhost, a container, a test database, an emulator; a committed migration is frozen and a schema change is a new one; a secret is never read, printed or written; nothing leaves the machine - no deploy, no publish, no message to a real recipient. The agent cannot open the env file that says where a command points, so `init` asks you once where your local env file points and writes the answer into `CLAUDE.md`; with no answer there, the agent asks before the first command that touches a store.
-- **The reachability bar** (`CLAUDE.md`, Working Principles), in a server's terms: a defect counts only when a real caller reaches it through an endpoint, a consumer or a job in ordinary operation of the deployment the project runs, and every finding states that path. Concurrency is not exotic here - two requests at once, a retry, a redelivery, hostile input and a restart mid-write are always in. Out of scope, in code and in review: a dependency answering outside its contract, data no code path can produce, a function called as no call site calls it, a deployment the project does not run. A borderline case is one "Not pursued" line, so neither the main thread nor the reviewer spends a round on it.
-- **One reviewer**, the `hunt` subagent: runtime defects only, every finding a concrete request or state traced through the real implementation the change consumes. Its attack-angle library is a server's: input at the boundary, authorization and tenancy, transactions and concurrency, schema and stored data, queries and load, errors and partial failure, numbers and time, contracts with callers - security and performance included, as defects with a scenario, never as advice. The project feeds it with its own bugs. Two modes: the plan before it is approved, the diff after it is written. `sonnet` at medium effort by default - one line of frontmatter raises it.
-- **One doc checker**, the `drift` subagent: every claim a changed identifier touches is re-checked by a command and comes back as an exact `replace:` / `with:` pair, a hand-kept API description included, and after a bug fix it proposes the one rule line no doc had. Two modes: `diff` at lifecycle step 5, launched only when the main thread's grep finds a doc naming what changed or the task fixed a bug, and `section <name>` from `maintain-ai-layer`. Read-only, `sonnet` at medium effort.
-- **Two guards**, both local and free of tokens. `guard.mjs` is the full layer's guard with its two test suites unchanged: it refuses mutating git however the command is spelled, `gh` writes, shell writes and in-place edits into the tree, a copy or move into the tree, deletes beyond the one grant, `cd` outside a subshell, protected paths, dashes. `backend-guard.mjs` is this layer's own, with its own suite. It **refuses** a read, a print or a write of a **secret file** (env files, keys, credentials - example files and public keys stay readable; a recursive `grep` over the folder that holds one counts), an edit, delete or move of a **committed migration**, and a command that **deploys or publishes** - cluster and infrastructure tools, the cloud CLIs' write verbs, image and package pushes. A command aimed at this machine by its own words passes: an emulator behind a localhost endpoint, a local cluster named with `--context`, a dry run. And it **asks you** before a command that **destroys data** - `DROP` and `TRUNCATE` handed to a database client, `docker compose down -v`, the migration tools' wipe commands: you see a permission prompt, so a reset you asked for is one click, and one you did not ask for does not happen. Three lists make it the project's: frozen paths, extra secret files, the project's own forbidden commands.
-- **One reminder**, `upkeep-nudge.mjs` at session start: when the `maintain-ai-layer` pass is 30 days overdue, the model tells you so in one line. Silent otherwise and in a linked worktree.
-- **Four skills**: `debug` (root cause before any fix: reproduce locally, never against a shared environment; evidence at five boundaries - request in, data access, derivation, side effects, response out; and what the bug already damaged, named apart from the fix), `handoff` (`.claude/handoff.md`, for a `/compact`, a new session or a usage window that runs out), `retro` (only from its slash command), and `maintain-ai-layer` - `weekly`, the cheap pass with at most three `drift` runs; `deep` and `rules` on request only, since each costs dozens of launches; and `init`, right after the install and whenever the project has moved on: the `[fill]` sections of `CLAUDE.md` from facts found in the repo, the rule set built or updated with evidence for every line, `hunt` tuned to the project. Its survey has five read-only agents - the toolchain and tests, the layout and the request path, data and configuration, the written knowledge, the fix history - and it reads the repo only.
+## Install
 
-## Tests
+1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-light-backend`.
+2. Open Claude Code in your project as the box above says, and paste the prompt with the path filled in. A first install asks one permission per copied file. `--add-dir` saves only the prompts for reading the bootstrap. Each copy still asks once - about 22 for this layer.
+3. When it is done, restart Claude Code and run `/maintain-ai-layer init`. It writes the project sections of `CLAUDE.md`, builds the path-scoped rules from your code and tunes `hunt` to the project.
 
-The layer has no test policy of its own. `<CHECK_COMMAND>` runs whatever the project runs, the suite included; `CLAUDE.md` has a Tests section that `init` fills with the project's own convention - where tests live, how to run one, what a run needs, when a change comes with one - and the layer follows that. Two places lean on the suite when there is one: `debug` accepts a failing test as the reproduction, and lifecycle step 3 exercises a changed path the check does not reach with the existing test that covers it, or with a request against the local instance.
+The same prompt updates a layer installed from an older version. Neither the install nor `init` starts your service, applies a migration or reads an env file. Each runs your check command once, and only when the database or containers it needs are already up. One layer per repo: a repo with both a server and a UI takes the layer that matches where the risk is.
 
-## What it changes, against the light frontend layer
+**Where the layer lives** - the install asks this first:
 
-| Unit | Light frontend | Here |
+| Mode | What it means |
+| --- | --- |
+| **Own repo** (recommended) | the whole layer in `.claude/`, excluded from the project's git and kept as your own git repo - history and a backup, and `git clean` or `git stash -a` in the project cannot delete it. Create a private repo and push the layer there; the install prints the commands. |
+| **Personal** | the same, without the nested repo |
+| **Team** | committed with the project, the root `CLAUDE.md` merged |
+
+You can also describe any other arrangement in your own words. A personal layer does not follow into a new `git worktree` (own repo: clone it into the new tree's `.claude/`).
+
+> [!WARNING]
+> In team mode the rules apply to everyone who uses Claude Code in the repo - agree it with the team first. The personal modes touch no file the project's git tracks.
+
+## What a task looks like
+
+1. You describe the task in chat, with the logs, stack traces or screenshots you have.
+2. Claude names the class: a question, a bounded change, a contract change (an endpoint, a schema, a payload, a config key) or a bug report.
+3. A bug report goes through the `debug` skill first: reproduce it locally, find the first boundary where the value goes wrong, name the cause.
+4. A contract change goes through plan mode, and `hunt` reviews the plan before you approve it.
+5. Claude implements, walks the callers it listed, runs your check command and exercises the changed path once against a local instance.
+6. `hunt` reviews the diff. Claude checks each finding against the code and accepts or rejects it with a reason.
+7. Claude greps the docs for what changed, and launches `drift` only when a doc names it.
+8. The reply closes with what stays unverified, the decisions taken for you, what you must do by hand (apply a migration, set a variable) and three commit subjects. You commit.
+
+## What it costs
+
+`CLAUDE.md` is the recurring bill: it loads on every turn, so it stays under 20 KB (about 5k tokens). A personal layer beside a team root `CLAUDE.md` loads both. Detail that only some files need goes into `.claude/rules/<name>.md` with a `paths:` frontmatter, which loads with those files. An agent launch is the one-off bill, tens of thousands of tokens each.
+
+| Task | Agent launches | Which |
 | --- | --- | --- |
-| `CLAUDE.md` | generic rules, a contract is "a signature, schema, props" | the same rules plus "Data, secrets and the outside world"; a contract is an endpoint, a schema, a payload, a config key; `[fill]` sections for tests, data and migrations, configuration and environments |
-| `hunt` | angles of a UI: state and effects, stale closures, a cache in the browser | angles of a server, listed above; it never connects to anything |
-| `debug` | boundaries from the input to what was rendered | boundaries from the request to the response, local reproduction only, damaged data named |
-| `guard.mjs`, its suites, `upkeep-nudge`, `handoff`, `retro`, `layer-refs.mjs` | - | the same files, byte for byte |
-| `backend-guard.mjs` and its suite | none | new |
-| `maintain-ai-layer` | four modes | the same four; `init` surveys data and configuration too, and reports stale hook lists |
-| Reachability bar | one user, one tab, human speed: two sessions at once and a backend answer outside its contract are out of scope | a real caller through the service's own entry points: two requests at once, a retry and hostile input are always in; a dependency outside its contract, data no code path can produce and a deployment the project does not run are out |
-| `CLAUDE.md` budget | 20 KB, about 5.5 for the project | 20 KB, about 3.5 for the project - the server rules and the server's own reachability bar take the difference, so project detail belongs in path-scoped rules |
+| Trivial edit (one file, obvious, low risk) | 0 | - |
+| Bounded change | usually 1, at most 4 | `hunt` on the diff; extras: a scoped second `hunt` round when a fix is itself non-trivial, `drift` when a doc names what changed, `Explore` for an unfamiliar area |
+| Planned or contract change | usually 2, at most 5 | `hunt` on the plan and on the diff, plus the same extras |
+| Bug fix | usually 1-2, at most 5 | as the class `debug` ends in; the gap check runs in the main thread and adds no launch |
 
-What it drops against the full layer is what the light layer drops, for the same reasons - `../claude-bootstrap-light-frontend/README.md` has the table: `gate`, `twins`, `comments`, the review ladder, session folders, the Stop hook, the reach checker, the browser check.
+| Agent | Model and effort | Where it is set |
+| --- | --- | --- |
+| `hunt` | `sonnet`, medium | its frontmatter in `.claude/agents/hunt.md` |
+| `drift` | `sonnet`, medium | its frontmatter in `.claude/agents/drift.md` |
+| `Explore` in a task | Claude Code's built-in default | - |
+| every agent `maintain-ai-layer` launches | `sonnet` (`drift` keeps its own effort) | `maintain-ai-layer/SKILL.md` |
+
+| Upkeep | When | Agent launches |
+| --- | --- | --- |
+| `/maintain-ai-layer init` | once after the install, and when the project has moved on | 5 survey agents (4 `Explore`, 1 `general-purpose`); then, with no rule yet, one `general-purpose` per area of about 250 source files, one for the migrations and schema files, one for the root config files and one on the fix history, and one per new rule family to check its reach |
+| `/maintain-ai-layer` (`deep`) | about once a month, when the reminder says so | one `drift` per unit (each `CLAUDE.md` section, rule, agent, skill, the hooks README, each source-folder README), the `rules` steps (next row), and 2 `general-purpose` walkers - dozens in all |
+| `/maintain-ai-layer rules` | on request | one `drift` per rule, one `general-purpose` per rule family, and 4 more (3 `Explore`, 1 `general-purpose`) for new rules; with no rule yet, the `init` build above |
+
+To spend less: say "no subagents" for a task - the main thread then carries the review and docs obligations itself. To spend more on a risky change, raise `model:` or `effort:` in `.claude/agents/hunt.md`. Do not run `Workflow` or ultracode here: they spawn agents by the dozen.
+
+## When a hook stops you
+
+> [!TIP]
+> - **A refusal** reads `Blocked by .claude/hooks/<hook>.mjs: ...`. It names the rule and the form that works, and Claude usually retries in that form by itself.
+> - **A question** comes from `backend-guard` before a command that wipes data, prints a cluster secret or reaches another host. It arrives as a permission prompt, in auto mode too. Approve it only if you asked for exactly that command.
+> - **A command that is yours to run** - a deploy, a migration on staging, a push - you run yourself: type `! <command>` in the Claude Code prompt.
+> - **To switch a rule off** for good, `.claude/hooks/README.md` "Switching a rule off" names every place it lives. The hyphen rule has no switch.
 
 ## What the guards cannot do
 
-`backend-guard.mjs` reads the text of one call. It does not see a script file that runs a forbidden command, a task-runner target that wraps one or a deploy tool its closed list does not name (add both to the forbidden list at install), SQL in a file handed to a database client, a secret printed from the process environment or reached through a variable, or a write request sent to a shared host - and it cannot know which database a connection string points at. Its lists err on the strict side: an env file with no secret in it and a private-looking fixture key are refused until their pattern is narrowed, and `.claude/hooks/README.md` says how. Those stay rules in `CLAUDE.md`, and the strongest protection is still outside the layer: credentials for shared environments that are not on the machine the agent works on.
+`backend-guard.mjs` reads the text of one call. It does not see a script file or a task-runner target that runs a forbidden command, SQL in a file handed to a database client, or a secret printed from the process environment. It cannot tell which database a connection string points at, and its deploy list is closed: a tool it does not name goes into the project's forbidden list at install. Its lists err on the strict side - an env file with no secret in it is refused until its pattern is narrowed. The rules in `CLAUDE.md` cover what the hook cannot see. The strongest protection is outside the layer: keep credentials for shared environments off the machine the agent works on.
 
-## Tuning it for cost
+## What is in it
 
-- **`CLAUDE.md` is the recurring bill.** Its 20 KB budget is roughly 5k tokens on every turn. Detail that only matters for some files goes into `.claude/rules/<name>.md` with a `paths:` frontmatter, which loads only when a matching file is read.
-- **A subagent is the one-off bill**, tens of thousands of tokens per launch. The lifecycle spends two on a task with a plan, one without, zero on a trivial edit - plus one `drift` when a doc names what changed or a bug was fixed, and one scoped second `hunt` round when a fix is itself non-trivial. Saying "no subagents" moves the obligations to the main thread rather than dropping them.
-- **The reviewer's model is one line** in `.claude/agents/hunt.md` (`model:`, `effort:`). Raise it for a migration or a release, lower it for a sweep.
-- **`maintain-ai-layer` has one cheap mode.** `weekly` spends at most three launches; `deep` and `rules` spend dozens and run only when you ask. `init` is deliberately not cheap: a rule set built on a thin survey costs every later session more than the survey did.
-- **Do not use `Workflow` or ultracode here.** They spawn agents by the dozen; that is the opposite of this layer.
+- **One lifecycle, six steps** (`CLAUDE.md`, Development Workflow), as above. A trivial edit skips the review and the docs check; a migration, a query that writes, a permission check or money arithmetic never counts as trivial.
+- **Four standing rules a server needs** (`CLAUDE.md`, Data, secrets and the outside world). The agent edits code anywhere, but what it **runs** reaches only this machine: localhost, a container, a test database, an emulator. A migration on the default branch is frozen, so a schema change is a new one. A secret is never read, printed or written. Nothing leaves the machine: no deploy, no publish, no message to a real recipient.
+- **Where the local env file points** is the one thing the agent cannot read. `init` asks you once and writes the answer into `CLAUDE.md`; until then, the agent asks before the first command that touches a store.
+- **The reachability bar** (`CLAUDE.md`, Working Principles): a defect counts only when a real caller reaches it through an endpoint, a consumer or a job, and every finding names that path. Two requests at once, a retry, a redelivery, hostile input, a restart mid-write and several instances of the service are always in scope. A dependency answering outside its contract and data no code path can produce are out.
+- **One reviewer**, the `hunt` subagent: runtime defects only, each a concrete request or state traced through the real code the change calls. Its attack angles are a server's - input, authorization and tenancy, transactions and concurrency, stored data, queries and load, partial failure, numbers and time, contracts with callers. The project feeds it with its own bugs.
+- **One doc checker**, the `drift` subagent: it re-checks every doc claim a changed identifier touches and returns exact `replace:` / `with:` pairs. After a bug fix the main thread runs its gap check itself, to propose the one rule line no doc had.
+- **Two guard hooks**, local and free of tokens. `guard.mjs` refuses git commands that commit, push or discard work, shell writes into the tree, broad deletes, `cd` outside a subshell, edits of generated files and dash characters. `backend-guard.mjs` refuses reading a secret file, editing a frozen migration and any command that deploys or publishes. It **asks you** before a command that wipes data, prints a cluster secret or opens a shell on another host. `.claude/hooks/README.md` has the full lists.
+- **One reminder**, `upkeep-nudge.mjs`: at session start, once the last upkeep pass is 30 days old, Claude tells you in one line that `/maintain-ai-layer` is due.
+- **Four skills.** `debug` finds the root cause before any fix, reproduces it locally and names the data the bug already damaged. `handoff` writes `.claude/handoff.md` for a `/compact` or a new session. `retro` runs only from its slash command. `maintain-ai-layer` keeps the layer true to the code: `deep` monthly, `rules` and `init` on request.
+
+The layer has no test policy of its own. `CLAUDE.md` has a Tests section that `init` fills with the project's convention, and the layer follows it.
+
+## Verify
+
+In the project, after the install and after every edit to a hook or one of its lists:
+
+```bash
+node .claude/hooks/tests/guard-test.mjs
+node .claude/hooks/tests/guard-shell-test.mjs
+node .claude/hooks/tests/backend-guard-test.mjs
+node .claude/hooks/tests/upkeep-nudge-test.mjs
+node .claude/skills/maintain-ai-layer/layer-refs.mjs
+```
+
+Each case line reads `ok` and each suite ends with `N passed, 0 failed`. `layer-refs.mjs` lists every skill, agent and path a layer doc names that does not resolve; each hit is fixed or explained.
+
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| lifecycle | the six steps every non-trivial task runs, in `CLAUDE.md` Development Workflow |
+| check command | the one command that runs every check the project has - `./gradlew check`, `mvn verify`, `dotnet test`, `make check`, a task-runner target that chains linting and tests; the install finds it, or proposes one |
+| contract change | a change to what a caller relies on - an endpoint, a schema, a message payload, a config key; it goes through plan mode |
+| `hunt` | the review agent: runtime defects only, each with a concrete failing request; it reviews the plan and the diff |
+| `drift` | the doc checker: it finds doc statements the code no longer matches and returns exact replacements |
+| `gate`, `twins` | review agents of the full frontend layer that this layer leaves out; `hunt` and the main thread carry their checks |
+| tier, ladder | the full layer picks reviewers by a ladder of tiers; this layer has one tier - `hunt` on every non-trivial change |
+| reachability bar | the line between a defect and a hypothetical: a real caller must reach it through the service's own entry points |
+| Not pursued | the one-line slot for a borderline case, `file:line - scenario - why unlikely`, with no fix and no extra round |
+| `[fill]` | a section of `CLAUDE.md` the project writes; `/maintain-ai-layer init` fills it from the repo |
+| rule reach | the files whose Read loads a path-scoped rule (`.claude/rules/*.md` with `paths:`), measured with `git ls-files` |
+| frozen migration | a migration on the upstream default branch (with no remote, any one git tracks); `backend-guard` refuses to edit, move or delete it |
+
+Maintaining the bootstrap itself - how it differs from the light frontend layer and which files must stay identical with it - is in [MAINTAINERS.md](MAINTAINERS.md).

@@ -105,7 +105,8 @@ const cases = [
   ['rm a numbered probe (allow)', 0, 'rm <SRC_DIR>/__hunt_probe2.ts'],
   ['cp between temp paths (allow)', 0, 'cp /tmp/a.ts /tmp/b.ts'],
   ['npm rm a package (allow)', 0, 'npm rm lodash'],
-  ['npm version patch (allow)', 0, 'npm version patch'],
+  // npm version commits and tags unless told not to.
+  ['npm version patch (deny)', 2, 'npm version patch'],
   ['a mover word inside a quoted pattern (allow)', 0, `grep -rn "rm ${BS}|mv ${BS}|cp " <SRC_DIR>/`],
   ['a redirect character inside a pattern (allow)', 0, 'grep -n "a>b" <SRC_DIR>/x.ts'],
   // in-place edits and shell writes
@@ -213,18 +214,117 @@ const cases = [
   ['a -c among the stdin script arguments (deny)', 2, "python - -c cfg.json <<'EOF'\nopen('<SRC_DIR>/a.ts','w').write('x')\nEOF"],
   ['gh co (deny)', 2, 'gh co 12'],
   ['git config edit (deny)', 2, 'git config edit --global'],
+  // git judged on the words it receives: a quoted or escaped value with a space is one word
+  ['git -C quoted path with a space, reset (deny)', 2, 'git -C "D:/Work Projects/proj" reset --hard'],
+  ['git -C escaped space, restore (deny)', 2, 'git -C D:/My\\ Projects/app restore .'],
+  ['git -c quoted value with a space, commit (deny)', 2, 'git -c "user.email=a b" commit -m x'],
+  ['git -C quoted path, reset (deny, PowerShell)', 2, "git -C 'D:\\Work Projects\\proj' reset --hard HEAD"],
+  ['git -C quoted path with a space, status (allow)', 0, 'git -C "D:/Work Projects/proj" status'],
+  ['git -C a braced variable, commit (deny)', 2, 'git -C ${ROOT} commit -m x'],
+  // git only where a shell runs it: text in an argument is not a command
+  ['git words in a script argument (allow)', 0, "npm run docs -- --title 'git checkout flow'"],
+  ['git words in echo text (allow)', 0, 'echo "Remember: never git push"'],
+  ['git commit behind env (deny)', 2, 'env git commit -m x'],
+  ['git commit behind xargs (deny)', 2, 'echo x | xargs git commit -m'],
+  ['git commit behind eval (deny)', 2, "eval 'git commit -m x'"],
+  ['git commit piped into bash (deny)', 2, "echo 'git commit -m x' | bash"],
+  ['git commit through Start-Process (deny, PowerShell)', 2, "Start-Process git -ArgumentList 'commit','-m','x'"],
+  // tools that commit, tag or push through git
+  ['npm version --no-git-tag-version (allow)', 0, 'npm version patch --no-git-tag-version'],
+  ['npm version alone lists versions (allow)', 0, 'npm version'],
+  ['npm view a version (allow)', 0, 'npm view react version'],
+  ['pnpm version (deny)', 2, 'pnpm version minor'],
+  ['yarn version (deny)', 2, 'yarn version'],
+  ['npx release-it (deny)', 2, 'npx release-it --ci'],
+  ['npx standard-version (deny)', 2, 'npx standard-version'],
+  ['npx lerna publish (deny)', 2, 'npx lerna publish from-git'],
+  ['npx semantic-release (deny)', 2, 'npx semantic-release'],
+  ['npx changeset publish (deny)', 2, 'npx changeset publish'],
+  ['npx changeset version (allow)', 0, 'npx changeset version'],
+  ['git subtree push (deny)', 2, 'git subtree push --prefix x origin y'],
+  ['git lfs push (deny)', 2, 'git lfs push origin main'],
+  ['git send-email (deny)', 2, 'git send-email x.patch'],
+  ['git fetch into a local branch (deny)', 2, 'git fetch . HEAD:refs/heads/main'],
+  ['git fetch a remote branch (allow)', 0, 'git fetch origin main'],
+  // other ecosystems' formatters; the project's own tasks pass
+  ['black (deny)', 2, 'black .'],
+  ['black --check (allow)', 0, 'black --check .'],
+  ['python -m black (deny)', 2, 'python -m black .'],
+  ['ruff format (deny)', 2, 'ruff format .'],
+  ['ruff format --diff (allow)', 0, 'ruff format --diff .'],
+  ['ruff check --fix (deny)', 2, 'ruff check --fix .'],
+  ['uv run ruff check (allow)', 0, 'uv run ruff check .'],
+  ['gofmt -w (deny)', 2, 'gofmt -l -w .'],
+  ['gofmt -l (allow)', 0, 'gofmt -l .'],
+  ['go fmt (deny)', 2, 'go fmt ./...'],
+  ['dotnet format (deny)', 2, 'dotnet format'],
+  ['dotnet format --verify-no-changes (allow)', 0, 'dotnet format --verify-no-changes'],
+  ['cargo fmt (deny)', 2, 'cargo fmt'],
+  ['cargo fmt --check (allow)', 0, 'cargo fmt --check'],
+  ['rustfmt a file (deny)', 2, 'rustfmt main.rs'],
+  ['ktlint -F (deny)', 2, 'ktlint -F "**/*.kt"'],
+  ['google-java-format -i (deny)', 2, 'google-java-format -i A.java'],
+  ['clang-format -i (deny)', 2, 'clang-format -i a.cpp'],
+  ['rubocop -a (deny)', 2, 'rubocop -a'],
+  ['gradle spotlessApply, the project task (allow)', 0, './gradlew spotlessApply'],
+  ['npm run format, the project script (allow)', 0, 'npm run format'],
+  ["sed's w command into the tree (deny)", 2, "sed -n 'w <SRC_DIR>/a.ts' /tmp/x"],
+  ["sed's s///w flag (deny)", 2, "sed 's/a/b/w out.txt' x.txt"],
+  ['sed address then w (deny)', 2, "sed -n '1,5w out.txt' a.txt"],
+  ['sed w to /dev/stdout (allow)', 0, "sed -n '/x/w /dev/stdout' a.txt"],
+  // heredoc bodies no shell reads are data or another program's code
+  ['python heredoc comparing with > (allow)', 0, "python3 - <<'X'\nprint(1 if 2 > 1 else 0)\nX"],
+  ['python heredoc return annotation (allow)', 0, "python3 - <<'EOF'\ndef f(a: int) -> int:\n    return a\nEOF"],
+  ['node heredoc arrow and > (allow)', 0, "node <<'EOF'\nconsole.log([1, 2].filter((x) => x > 1));\nEOF"],
+  ['psql heredoc with > (allow)', 0, "psql -d app <<'SQL'\nSELECT count(*) FROM orders WHERE total > 100;\nSQL"],
+  ['heredoc into /tmp with > in the body (allow)', 0, "cat <<'EOF' > /tmp/q.sql\nSELECT a FROM t WHERE a > 3;\nEOF"],
+  ['notes heredoc naming cd and git push (allow)', 0, "cat > /tmp/notes.md <<'EOF'\nthen cd backend\nsteps: git push origin main\nEOF"],
+  ['heredoc a shell reads, git push in it (deny)', 2, "bash <<'EOF'\ngit push\nEOF"],
+  ['unquoted heredoc running a substitution (deny)', 2, 'cat > /tmp/n.md <<EOF\n$(git push)\nEOF'],
+  ['python heredoc running git commit (deny)', 2, "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'commit', '-m', 'x'])\nEOF"],
+  // scratch targets: a name set from mktemp, and PowerShell's writers judged by their target
+  ['mktemp name as a redirect target (allow)', 0, 'T=$(mktemp); npm ls > $T'],
+  ['mktemp name after && (allow)', 0, 'OUT=$(mktemp) && npm ls --json > $OUT && jq .name $OUT'],
+  ['mktemp with a template in the tree (deny)', 2, 'T=$(mktemp <SRC_DIR>/x.XXXX); echo x > $T'],
+  ['mktemp name assigned again (deny)', 2, 'T=$(mktemp); T=<SRC_DIR>/a.ts; echo x > $T'],
+  ['Out-File to TEMP (allow, PowerShell)', 0, 'npm ls | Out-File "$env:TEMP\\out.txt"'],
+  ['Set-Content -Path TEMP (allow, PowerShell)', 0, 'npm ls | Set-Content -Path $env:TEMP\\x'],
+  ['Out-File into the tree (deny, PowerShell)', 2, "'x' | Out-File <SRC_DIR>/a.ts"],
+  ['Add-Content into the tree (deny, PowerShell)', 2, 'Add-Content -Path <SRC_DIR>/a.ts -Value x'],
+  ['Set-Content with no target (deny, PowerShell)', 2, 'Get-Content a.txt | Set-Content'],
+  ["sed's e command (deny)", 2, "sed -n '1e git push' x"],
+  ["sed's s///e flag (deny)", 2, "sed 's/x/date/e' a.txt"],
+  ['git lfs pull after a clone (allow)', 0, 'git lfs pull'],
+  ['git lfs install (allow)', 0, 'git lfs install'],
+  ['git lfs migrate (deny)', 2, "git lfs migrate import --include='*.bin'"],
+  ['Out-File to ${env:TEMP} (allow, PowerShell)', 0, "'x' | Out-File ${env:TEMP}\\a.txt"],
+  ['New-TemporaryFile name as a target (allow, PowerShell)', 0, '$t = New-TemporaryFile; npm ls > $t'],
+  ['GetTempFileName name as a target (allow, PowerShell)', 0, '$T = [IO.Path]::GetTempFileName(); npm ls | Out-File $t'],
+  ['temp-file name assigned again (deny, PowerShell)', 2, "$t = New-TemporaryFile; $t = 'src/a.ts'; npm ls > $t"],
+  ['Set-Content comma list with a tree path (deny, PowerShell)', 2, "'x' | Set-Content $env:TEMP\\a, <SRC_DIR>\\b.ts"],
+  ['sc alias into the tree (deny, PowerShell)', 2, "'x' | sc <SRC_DIR>\\a.ts"],
+  ['ac alias into the tree (deny, PowerShell)', 2, "'x' | ac <SRC_DIR>\\a.ts"],
+  ['sc under Bash is another program (allow)', 0, 'sc query wuauserv'],
+  ['pathlib write_text in a one-liner (deny)', 2, `python -c "import pathlib; pathlib.Path('<SRC_DIR>/a.ts').write_text('x')"`],
+  ['pathlib write_text to /tmp (allow)', 0, `python -c "import pathlib; pathlib.Path('/tmp/a.txt').write_text('x')"`],
+  ['pathlib write_text from a stdin heredoc (deny)', 2, "python3 - <<'EOF'\nfrom pathlib import Path\nPath('<SRC_DIR>/a.ts').write_text('x')\nEOF"],
+  // pathological input finishes inside the hook timeout, so the write in it is still refused
+  ['unclosed $(( repeated, then a write (deny)', 2, `echo ${'$((1+(2*3)) '.repeat(3000)}> <SRC_DIR>/a.ts`],
 ];
 
 let failed = 0;
 for (const [name, want, command] of cases) {
   const tool = name.includes('PowerShell') ? 'PowerShell' : 'Bash';
+  // The hook's own timeout: a guard killed there allows the call.
   const r = spawnSync('node', [guard], {
     input: JSON.stringify({ tool_name: tool, tool_input: { command }, cwd: root }),
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    timeout: 10000,
   });
   const ok = r.status === want;
   if (!ok) failed += 1;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(44)} exit ${r.status}  ${r.stderr.trim().slice(0, 50)}`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(44)} exit ${r.status}  ${(r.stderr ?? '').trim().slice(0, 50)}`);
 }
+console.log(`${cases.length - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

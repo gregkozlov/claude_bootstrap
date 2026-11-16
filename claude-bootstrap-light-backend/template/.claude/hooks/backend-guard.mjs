@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // PreToolUse guard for a server codebase, registered beside guard.mjs. It refuses what a backend adds to that list:
 //   Read / Grep                - a secret file: an env file, a private key, a credentials file (SECRET_PATHS).
-//   Edit / Write / MultiEdit   - a secret file; and a frozen file, one matching FROZEN_PATHS that git already
-//                                tracks: a committed migration is never edited, the change is a new migration.
+//   Edit / Write / MultiEdit   - a secret file; and a frozen file, one matching FROZEN_PATHS that is on the upstream
+//                                default branch (with no remote: that git tracks): a merged migration is never
+//                                edited, the change is a new migration.
 //   Bash / PowerShell          - a command that prints or copies a secret file, one that deletes or moves a frozen
 //                                file, and one that deploys, changes infrastructure or publishes (FORBIDDEN, plus the
-//                                project's own list). A command that destroys data is not refused: the user is asked.
+//                                project's own list). A command that destroys data, prints a cluster secret or opens
+//                                a shell or a copy to another host is not refused: the user is asked.
 // It is a separate file so that guard.mjs stays the same file in every layer of this bootstrap.
 // Reads one JSON payload on stdin. Exit 2 with the reason on stderr blocks the call; exit 0 allows it; exit 0 with
 // a permissionDecision of "ask" on stdout hands the call to the user's permission prompt.
@@ -35,6 +37,8 @@ const FROZEN_PATHS = sources(FROZEN_RAW).map((source) => new RegExp(source));
 // known_hosts or authorized_keys file, and a chart's templates folder. Delete or narrow a line the project does not
 // want - a tracked `.env.test` with no secret in it is the usual one.
 const EXAMPLE = String.raw`(?![^/]*\b(?:example|sample|template|dist|defaults?)\b)`;
+// A user's home folder by its absolute path or its shell spelling: a project's own .npmrc holds no token as a rule.
+const HOME = String.raw`(?:^|\/)(?:(?:Users|home)\/[^/]+|root|~|\$HOME|\$\{HOME\}|\$env:(?:USERPROFILE|HOME)|%USERPROFILE%)\/`;
 const SECRET_PATHS = [
   new RegExp(String.raw`(?:^|\/)\.env(?:[.\-_]${EXAMPLE}[^/]+)?$`, 'i'),
   new RegExp(String.raw`(?:^|\/)${EXAMPLE}[^/]+\.env$`, 'i'),
@@ -49,6 +53,15 @@ const SECRET_PATHS = [
   /(?:^|\/)service[-_]?account[^/]*\.json$/i,
   /\.tfstate(?:\.backup)?$/i,
   /(?:^|\/)terraform\.tfvars(?:\.json)?$/i,
+  /(?:^|\/)\.m2\/settings(?:-security)?\.xml$/i,
+  /(?:^|\/)\.gradle\/gradle\.properties$/i,
+  new RegExp(String.raw`${HOME}\.(?:npmrc|yarnrc\.yml)$`, 'i'),
+  new RegExp(String.raw`(?:${HOME}(?:AppData\/Roaming\/NuGet|\.nuget\/NuGet|\.config\/NuGet)|(?:^|\/)(?:%APPDATA%|\$env:APPDATA)\/NuGet)\/NuGet\.Config$`, 'i'),
+  // A kubeconfig by name, not a source file about one (kubeconfig.go, KubeconfigLoader.java).
+  new RegExp(String.raw`(?:^|\/)${EXAMPLE}[^/]*kubeconfig(?:[-_][^/.]*)?(?:\.(?:ya?ml|json|conf|config|cfg))?$`, 'i'),
+  /(?:^|\/)client_secret[^/]*\.json$/i,
+  /(?:^|\/)application_default_credentials\.json$/i,
+  /(?:^|\/)(?:\.config|AppData\/Roaming)\/gcloud(?:\/|$)/i,
   ...sources(SECRET_RAW).map((source) => new RegExp(source, 'i')),
 ];
 
@@ -62,8 +75,18 @@ const without = (flags) => String.raw`(?!.*\s(?:${flags})(?=\s|$))`;
 // there is `vercel` a deploy - after `npm install` it is a package name.
 const HEAD = String.raw`^(?:[A-Za-z_]\w*=\S*\s+)*(?:(?:npx|bunx|pnpm\s+(?:dlx|exec)|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)\s+(?:-\S+\s+)*)?(?:\S*[\\/])?`;
 // scope: what the pattern is tested against - 'bare' (a quoted argument with spaces is blanked: it is a message, a
-// filter or a name, never the verb) or 'sql' (the whole segment but its SQL string literals).
-const rule = (kind, label, source, scope = 'bare') => ({ kind, label, scope, pattern: new RegExp(source, 'i') });
+// filter or a name, never the verb), 'sql' (the whole segment but its SQL string literals) or 'words' (the bare
+// words as an array, for a source that is a function). hint: a sentence the refusal adds.
+const rule = (kind, label, source, scope = 'bare', hint = '') => ({
+  kind,
+  label,
+  scope,
+  hint,
+  pattern: typeof source === 'function' ? { test: source } : new RegExp(source, 'i'),
+});
+// An image reference on this machine, and the end of a segment where only options follow it.
+const LOCAL_REGISTRY = String.raw`(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/`;
+const LAST = String.raw`(?:\s+-\S+)*\s*$`;
 const SQL_CLIENTS = 'psql|mysql|mariadb|sqlcmd|sqlite3|clickhouse-client|cockroach|usql|pgcli|mycli|bq|snowsql';
 const SQL_DROP = String.raw`\b(?:DROP\s+(?:DATABASE|SCHEMA|TABLE|COLUMN|INDEX|VIEW|ROLE|USER|OWNED)|TRUNCATE)\b`;
 const SQL_UNBOUNDED = String.raw`\b(?:DELETE\s+FROM|UPDATE\s+\S+(?:\s+(?:AS\s+)?\w+)?\s+SET)\b(?![^;]*\bWHERE\b)`;
@@ -73,7 +96,7 @@ const SQL_WIPE = new RegExp(`${SQL_DROP}|${SQL_UNBOUNDED}`, 'i');
 const AWS_WRITE =
   String.raw`(?:delete|terminate|remove|put|create|run|stop|reboot|modify|deregister|register|attach|detach|publish|send|invoke|deploy|restore|purge|reset|revoke|authorize|associate|disassociate|import|execute)-[\w-]+|start-(?!query|live-tail)[\w-]+|update-(?!kubeconfig)[\w-]+|batch-(?:write|delete|execute)-[\w-]+|rm|rb|mb|mv|deploy|invoke|publish|(?:cp|sync)\s+(?:-\S+\s+)*(?!s3:)[^-\s]\S*\s+(?:-\S+\s+)*s3://\S*`;
 const FORBIDDEN = [
-  rule('deploy', 'kubectl', tool('kubectl|oc') + String.raw`(?!\s+auth\s+can-i(?=\s|$))` + then(String.raw`apply|delete|patch|replace|scale|rollout\s+(?:restart|undo|pause|resume)|drain|cordon|uncordon|taint|edit|set|create|annotate|label|exec|debug|cp|run|expose|autoscale|use-context|set-context|delete-context|set-cluster|set-credentials`)),
+  rule('deploy', 'kubectl', tool('kubectl|oc') + first(String.raw`apply|delete|patch|replace|scale|rollout\s+(?:restart|undo|pause|resume)|drain|cordon|uncordon|taint|edit|set|create|annotate|label|exec|debug|cp|run|expose|autoscale|config\s+(?:use-context|set-context|delete-context|set-cluster|set-credentials|set)`)),
   rule('deploy', 'helm', tool('helm|helmfile') + first('install|upgrade|uninstall|delete|rollback|push|apply|sync|destroy')),
   rule('deploy', 'terraform', tool('terraform|tofu|terragrunt') + then(String.raw`apply|destroy|import|taint|untaint|force-unlock|state\s+(?:rm|mv|push)|workspace\s+(?:new|delete)`)),
   rule('deploy', 'pulumi', tool('pulumi') + then('up|destroy|refresh|import|cancel')),
@@ -82,18 +105,37 @@ const FORBIDDEN = [
   rule('deploy', 'a deploy tool', tool('cap') + String.raw`(?:\s+\S+)?\s+deploy(?::[\w:]+)?(?=\s|$)` + '|' + tool('copilot') + then('deploy|delete') + '|' + tool('func') + String.raw`\s+azure\s+functionapp\s+publish(?=\s|$)`),
   rule('deploy', 'serverless', tool('sls') + first('deploy|remove')),
   rule('deploy', 'cf', tool('cf') + first('push|delete|delete-space')),
-  rule('deploy', 'a deploy tool', tool('skaffold') + first('run|deploy|delete') + '|' + tool('argocd') + String.raw`\s+app\s+(?:sync|delete|create|set|rollback)(?=\s|$)` + '|' + tool('supabase') + then('deploy')),
+  rule('deploy', 'skaffold deploys to the current kube context', tool('skaffold') + first('run|dev|deploy|delete'), 'bare', 'On a local cluster, retry with --kube-context kind-<name> (or minikube, docker-desktop).'),
+  rule('deploy', 'a deploy tool', tool('argocd') + String.raw`\s+app\s+(?:sync|delete|create|set|rollback)(?=\s|$)` + '|' + tool('supabase') + then('deploy')),
   rule('deploy', 'eksctl', tool('eksctl') + first('create|delete|upgrade|scale')),
-  rule('deploy', 'aws', tool('aws') + then(AWS_WRITE)),
+  // The operation is the word after the service: `--function-name create-order` is a name.
+  rule('deploy', 'aws', tool('aws') + first(String.raw`(?![-+])\S+` + first(AWS_WRITE))),
   rule('deploy', 'gcloud', tool('gcloud') + String.raw`(?!\s+(?:components|config)\s)` + then('deploy|delete|create|update|apply|submit|import|ssh|scp|add-iam-policy-binding|remove-iam-policy-binding|set-iam-policy|start|stop|reset|resize|rollback')),
   rule('deploy', 'az', tool('az') + String.raw`(?!\s+account\s)` + then(String.raw`(?:create|delete|upload)(?:-[\w-]+)?|update|up|deploy|start|stop|restart|set|purge|import`)),
   rule('deploy', 'a hosting CLI', tool('fly|flyctl|netlify|railway|firebase|wrangler') + then(String.raw`deploy|publish|destroy|launch|scale|up|down|secrets?\s+(?:set|unset|import|put|delete)`)),
   rule('deploy', 'vercel', tool('vercel') + String.raw`(?!\s+(?:build|pull|dev|env|login|logout|whoami|ls|list|logs|inspect|link|help)(?=\s|$))` + then('deploy|promote|rollback|remove|rm|--prod') + '|' + HEAD + String.raw`vercel(?:\s+(?!--version|--help|-v|-h)-\S+)*\s*$`),
   rule('deploy', 'heroku', tool('heroku') + then(String.raw`run(?::\w+)?|restart|rollback|[\w-]+:(?:destroy|reset|rollback|restart|scale|promote|push|set|unset|create|add|remove|kill|release)[\w:-]*`)),
   rule('deploy', 'docker swarm', tool('docker') + first('stack|service') + first('deploy|rm|create|update|scale|rollback')),
+  rule('deploy', 'a docker daemon on another host', dockerRemote, 'words'),
+  rule('deploy', 'az acr build or run', tool('az') + first('acr') + first('build|run')),
+  // A folder profile publishes on this machine; DeployOnBuild with one passes too.
+  rule('deploy', 'a .NET publish profile', String.raw`^(?!.*\bPublishProfile=FolderProfile\b|.*\bWebPublishMethod=FileSystem\b)(?:.*` + tool('dotnet') + first('publish|msbuild|build') + '|.*' + tool('msbuild') + String.raw`)(?=.*\s(?:[-\/]p|(?:--?|\/)property):\S*?\b(?:PublishProfile=|WebPublishMethod=|DeployOnBuild=true\b))`),
+  rule('remote', 'ssh, scp, sftp or rsync to another host', (words) => Boolean(remoteHost(words)), 'words'),
 
   rule('publish', 'an image push', tool('docker|podman|nerdctl') + '(?:(?:' + first('compose|image|manifest') + ')?' + first('push') + '|' + then('--push') + ')'),
   rule('publish', 'an image push', tool('docker-compose|podman-compose') + first('push')),
+  // jibDockerBuild and jib:dockerBuild build into the local daemon and pass.
+  // jib to a registry on localhost (`-Dimage=`, `-Djib.to.image=`, `--image=`) passes as well.
+  rule('publish', 'an image push', String.raw`^(?!.*\s(?:-Dimage=|-Djib\.to\.image=|--image=)${LOCAL_REGISTRY}).*(?:` + tool('gradle|gradlew') + then(String.raw`(?:[\w-]*:)*jib`) + '|' + tool('mvn|mvnw') + then(String.raw`(?:com\.google\.cloud\.tools:)?jib(?:-maven-plugin(?::[\w.-]+)?)?:build`) + ')'),
+  rule('publish', 'an image push', tool('gradle|gradlew') + then(String.raw`(?:[\w-]*:)*bootBuildImage`) + String.raw`(?=.*\s--publishImage(?=\s|$))` + '|' + tool('mvn|mvnw') + String.raw`(?=.*\s-Dspring-boot\.build-image\.publish(?:=true)?(?=\s|$))` + then(String.raw`(?:[\w.-]+:)*spring-boot(?:-maven-plugin(?::[\w.-]+)?)?:build-image(?:-no-fork)?`)),
+  rule('publish', 'an image push', String.raw`^(?!.*(?:^|\s)KO_DOCKER_REPO=(?:ko|kind)\.local(?=[\s\/]|$)).*` + tool('ko') + without(String.raw`--local(?:=true)?|-L|--push=false`) + first('build|apply|resolve')),
+  // A copy lands on the reference it names last; an edit in place works on any it names.
+  rule('publish', 'an image push', tool('crane') + first('push|copy|cp') + String.raw`(?!.*\s${LOCAL_REGISTRY}\S*${LAST})`),
+  rule('publish', 'a registry change', tool('crane') + first('delete|tag|mutate|append|rebase') + String.raw`(?!.*\s(?:--?\w[\w-]*=)?${LOCAL_REGISTRY})`),
+  rule('publish', 'an image push', tool('buildah') + `(?:${first('manifest')})?` + first('push') + String.raw`(?!.*\s(?:(?:docker:\/\/)?${LOCAL_REGISTRY}|(?:docker-daemon|containers-storage|oci|oci-archive|docker-archive|dir):)\S*${LAST})`),
+  rule('publish', 'an image push', tool('skopeo') + first('copy') + String.raw`.*\sdocker:\/\/(?!${LOCAL_REGISTRY})\S+${LAST}` + '|' + tool('skopeo') + first('delete') + String.raw`.*\sdocker:\/\/(?!${LOCAL_REGISTRY})\S`),
+  rule('publish', 'an image push', tool('skopeo') + first('sync') + String.raw`(?!.*\s--dest[= ]dir(?=\s|$))(?!.*\s${LOCAL_REGISTRY}\S*${LAST})`),
+  rule('publish', 'an artifact push', tool('oras') + first('push|attach') + String.raw`(?!(?:\s+-\S+(?:\s+(?!-)\S+)??)*?\s+${LOCAL_REGISTRY})` + '|' + tool('oras') + first('cp|copy') + String.raw`(?!.*\s${LOCAL_REGISTRY}\S*${LAST})`),
   rule('publish', 'a package publish', tool('npm|pnpm|yarn|bun') + '(?:' + first('npm|run|run-script') + ')?' + first('publish|unpublish|deprecate')),
   rule('publish', 'a package publish', tool('lerna|changeset') + then('publish') + '|' + HEAD + String.raw`semantic-release(?=\s|$)`),
   rule('publish', 'a package publish', tool('twine|maturin') + then('upload') + '|' + String.raw`\bsetup\.py\s+(?:\S+\s+)*?upload(?=\s|$)`),
@@ -106,6 +148,12 @@ const FORBIDDEN = [
   rule('publish', 'a package publish', tool('nuget') + then('push|delete')),
   rule('publish', 'a package publish', tool('mix') + then(String.raw`hex\.publish`)),
   rule('publish', 'a release', tool('goreleaser') + without(String.raw`--snapshot|--skip-publish|--skip=\S*publish\S*`) + then('release') + '|' + HEAD + String.raw`goreleaser(?:\s+(?!--snapshot|--skip|--version|--help|-v|-h)-\S+)*\s*$`),
+
+  // `compose config` prints the file with every env value filled in; these options print names only.
+  // `convert` is its alias. Every --env-file an example file: only placeholders to fill in.
+  rule('secret', 'compose config prints the interpolated env values', String.raw`^(?!(?=.*\s--env-file[= ])(?!.*\s--env-file[= ](?!(?:\S*\/)?[^\s/]*\b(?:example|sample|template|dist|defaults?)\b))).*(?<![\w.-])(?:docker|podman)(?:-|\s+)compose(?=\s)` + first('config|convert') + without(String.raw`--services|--volumes|--profiles|--images|--networks|--hash(?:=\S+)?|-q|--quiet`)),
+  // A list of secrets shows names, `describe` byte counts; an output format prints the values.
+  rule('reveal', 'a cluster secret', tool('kubectl|oc') + String.raw`(?=.*\s(?:-o\s*|-o=|--output[= ])(?:ya?ml|jsonpath|json|go-template|custom-columns|template)(?=[=\s]|-|$))` + first('get') + String.raw`(?:\s+[-+]\S+(?:\s+(?![-+])\S+)??)*?\s+(?:\S*,)?secrets?(?:[\/,.]\S*)?(?=\s|$)`),
 
   rule('data', 'compose down with its volumes', String.raw`(?<![\w.-])(?:docker|podman)(?:-|\s+)compose(?=\s)` + first('down') + String.raw`(?=.*\s(?:-v|--volumes)(?=\s|$))`),
   rule('data', 'a volume or system prune', tool('docker|podman') + String.raw`\s+(?:volume\s+(?:rm|prune)|system\s+prune)(?=\s|$)`),
@@ -139,18 +187,96 @@ const KIND = {
   project: "is on this project's forbidden list",
 };
 // A dry run reaches nothing, and neither does a call aimed at this machine: an emulator behind a localhost
-// endpoint, the gcloud emulators, a cluster named as a local one, a registry on localhost. Both pass the deploy
-// and publish rules; a kubectl call that names no context is not known to be local and does not.
+// endpoint, the gcloud emulators, a cluster named as a local one, a registry on localhost (the image a push names
+// last, or every tag of a `--push` build). They pass the deploy and publish rules; a kubectl call that names no
+// context is not known to be local and does not.
 const DRY_RUN = /\s--dry-run(?:=(?!none|false)\S+)?(?=\s|$)/i;
 const LOCAL = new RegExp(
   [
     String.raw`\s--endpoint-url[= ]https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|host\.docker\.internal|localstack)(?::\d+)?(?=[\/\s]|$)`,
     String.raw`(?:^|\s)gcloud(?:\s+(?:alpha|beta))?\s+emulators\s`,
     String.raw`\s--(?:kube-)?context[= ](?:kind-[\w.-]+|k3d-[\w.-]+|minikube|docker-desktop|rancher-desktop|colima|orbstack)(?=\s|$)`,
-    String.raw`\spush\s+(?:localhost|127\.0\.0\.1)(?::\d+)?\/\S`,
+    String.raw`\spush(?:\s+-\S+)*\s+${LOCAL_REGISTRY}\S*${LAST}`,
   ].join('|'),
   'i',
 );
+const LOCAL_IMAGE = new RegExp(`^${LOCAL_REGISTRY}`, 'i');
+function localTagsOnly(words) {
+  if (!words.some((word) => /^--push(?:=true)?$/i.test(word))) return false;
+  const tags = words.flatMap((word, index) => {
+    if (/^(?:-t|--tag)$/.test(words[index - 1] ?? '')) return [word];
+    const joined = /^(?:-t=|--tag=)(.+)$/.exec(word);
+    return joined ? [joined[1]] : [];
+  });
+  return tags.length > 0 && tags.every((tag) => LOCAL_IMAGE.test(tag));
+}
+
+// `docker -H ssh://prod compose up` changes the other host; a call that only reads it (`ps`, `logs`) passes.
+const DOCKER_VALUE = /^(?:-H|--host|-c|--context|--config|-l|--log-level|--tlscacert|--tlscert|--tlskey|-f|--file|-p|--project-name|--env-file|--profile|--project-directory|--ansi|--progress|--parallel)$/;
+const DOCKER_GROUPS = new Set(['compose', 'container', 'image', 'volume', 'network', 'system', 'service', 'stack', 'node', 'plugin', 'buildx', 'builder', 'manifest', 'swarm', 'trust']);
+const DOCKER_READS = new Set(['ps', 'ls', 'list', 'images', 'logs', 'inspect', 'info', 'version', 'events', 'stats', 'top', 'port', 'diff', 'history', 'search', 'df', 'config', 'convert', 'show', 'help', 'login', 'logout', 'context']);
+const LOCAL_DOCKER_HOST = /^(?:(?:unix|npipe|fd):|(?:tcp|ssh|https?):\/\/(?:[^@\/]+@)?(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/?$)/i;
+const LOCAL_DOCKER_CONTEXT = /^(?:default|desktop-linux|docker-desktop|rancher-desktop|colima(?:-[\w.-]+)?|orbstack)$/i;
+// Set when the call assigns DOCKER_HOST or DOCKER_CONTEXT another host anywhere (`export`, `$env:`): every docker
+// call after it in the same command talks to that host.
+let dockerElsewhere = false;
+const DOCKER_ASSIGN = /(?:^|[\s;&|(])(?:export\s+|set\s+|\$env:)?DOCKER_(HOST|CONTEXT)\s*=\s*["']?([^\s"';&|)]+)/gi;
+function noteDockerAssignments(command) {
+  for (const [, name, value] of command.matchAll(DOCKER_ASSIGN)) {
+    if (!(name.toUpperCase() === 'HOST' ? LOCAL_DOCKER_HOST : LOCAL_DOCKER_CONTEXT).test(value)) dockerElsewhere = true;
+  }
+}
+function dockerRemote(words) {
+  const at = words.findIndex((word) => commandName(word) === 'docker' || commandName(word) === 'docker-compose');
+  if (at === -1) return false;
+  let remote = dockerElsewhere || words.slice(0, at).some((word) => {
+    const env = /^DOCKER_(HOST|CONTEXT)=(.*)$/.exec(word);
+    return Boolean(env?.[2]) && !(env[1] === 'HOST' ? LOCAL_DOCKER_HOST : LOCAL_DOCKER_CONTEXT).test(env[2]);
+  });
+  const verbs = commandName(words[at]) === 'docker-compose' ? ['compose'] : [];
+  for (let index = at + 1; index < words.length && verbs.length < 2; index += 1) {
+    const word = words[index];
+    const option = /^(-H|--host|-c|--context)(?:=(.*))?$/.exec(word);
+    if (option) {
+      const value = option[2] ?? words[(index += 1)] ?? '';
+      if (!(/^(?:-H|--host)$/.test(option[1]) ? LOCAL_DOCKER_HOST : LOCAL_DOCKER_CONTEXT).test(value)) remote = true;
+    } else if (DOCKER_VALUE.test(word)) index += 1;
+    else if (!word.startsWith('-')) {
+      verbs.push(word.toLowerCase());
+      if (!DOCKER_GROUPS.has(verbs[0])) break;
+    }
+  }
+  return remote && verbs.length > 0 && !DOCKER_READS.has(verbs[verbs.length - 1]);
+}
+
+// The other host an ssh, sftp, scp or rsync call reaches: ssh and sftp name it first, a copy as `host:path`.
+const REMOTE_TOOLS = new Set(['ssh', 'sftp', 'scp', 'rsync']);
+const REMOTE_VALUE = { ssh: 'BbcDEeFIiJLlmOoPpQRSWw', sftp: 'BbcDFiJloPRSsX', scp: 'cDFiJloPS', rsync: 'eTf' };
+const LOCAL_HOST = /^\[?(?:localhost|127\.0\.0\.1|::1)\]?$/i;
+function hostOf(word, bare) {
+  const scheme = /^(?:ssh|sftp|scp|rsync):\/\/(?:[^@\/]*@)?(\[[^\]]*\]|[^:\/]+)/i.exec(word);
+  if (scheme) return scheme[1];
+  const remote = /^(?:[^@\/]*@)?(\[[^\]]*\]|[^:\/@]+)(:|$)/.exec(word);
+  if (!remote || (!remote[2] && !bare)) return '';
+  // One letter before the colon is a Windows drive.
+  return remote[2] && remote[1].length === 1 ? '' : remote[1];
+}
+function remoteHost(words) {
+  const at = words.findIndex((word) => REMOTE_TOOLS.has(commandName(word)));
+  if (at === -1) return '';
+  const name = commandName(words[at]);
+  const plain = [];
+  for (let index = at + 1; index < words.length; index += 1) {
+    const word = words[index];
+    if (!word.startsWith('-')) plain.push(word);
+    else if (/^-[A-Za-z]+$/.test(word) && REMOTE_VALUE[name].includes(word.slice(-1))) index += 1;
+    else if (name === 'rsync' && /^--(?:rsh|filter|exclude|include|files-from|exclude-from|include-from)$/.test(word)) index += 1;
+  }
+  // `ssh -T git@host` only checks that the git host accepts the key.
+  if (name === 'ssh' && words.includes('-T') && plain.length === 1 && /^git@/i.test(plain[0])) return '';
+  const hosts = name === 'ssh' || name === 'sftp' ? plain.slice(0, 1).map((word) => hostOf(word, true)) : plain.map((word) => hostOf(word, false));
+  return hosts.find((host) => host && !LOCAL_HOST.test(host)) ?? '';
+}
 
 // A segment whose head only searches or prints text is not judged against FORBIDDEN: its arguments are patterns
 // and messages (`grep "terraform apply" docs`, `echo`, `git log --grep`).
@@ -174,7 +300,13 @@ const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr
 const COPIERS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'scp', 'rsync', 'mv', 'move', 'move-item']);
 const GREPS = new Set(['grep', 'egrep', 'fgrep']);
 const RECURSIVE = /^(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive|--dereference-recursive)$/;
-const SCOPED = /^--(?:include|exclude)(?:-dir)?(?:=|$)/i;
+const GREP_FILTER = /^--(include|exclude|exclude-dir)(?:=(.*))?$/i;
+// The grep options that take the next word as their value; -e and -f (and their long forms) give the pattern.
+const GREP_VALUE = /^(?:-[A-Za-z]*[efmABCdD]|--(?:regexp|file|max-count|after-context|before-context|context|devices|directories|label|binary-files|exclude-from))$/;
+// grep -r reads build output too, so only these are skipped unasked: a search through them is almost never meant.
+const WALK_SKIP = new Set(['node_modules', '.git']);
+const TOO_LARGE = Symbol('too large');
+const WALK_CAP = 20000;
 const PATH_PARAM = /^-(?:Path|LiteralPath|LP|PSPath)$/i;
 const EXPRESSION = /^(?:-e|--regexp|--expression)$/;
 const EXCLUDE_FLAG = /^--exclude(?:-dir)?$/i;
@@ -192,6 +324,9 @@ const LAUNCHERS = new Set([
   'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'pwsh', 'powershell', 'eval', 'iex', 'invoke-expression', 'ssh',
   'wsl', 'su', 'sudo', 'xargs', 'watch', 'timeout', 'nohup', 'env', 'docker', 'podman', 'kubectl', 'find', 'parallel',
 ]);
+// An interpreter, and the option whose value is code it runs (`-e`, `-c`, `-p`, `-r`, perl's `-ne`, `deno eval`).
+const INTERPRETERS = /^(?:node|nodejs|python[\d.]*|py|ruby|perl|php|bun|deno)$/;
+const CODE_FLAG = /^(?:-[A-Za-z]*[cepEr]|--eval|--print|eval)$/;
 const POSIX_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'wsl', 'ssh']);
 const SHELL_HEREDOC = /(?:^|[\s;&|(\/])(?:bash|sh|zsh|dash|ksh|ssh|eval|source)(?=[\s;&|)<]|$)/;
 const MAX_DEPTH = 3;
@@ -204,8 +339,14 @@ function deny(reason) {
 
 // A refusal anywhere in the call outranks a question, so the question waits until the whole call was read.
 let question = '';
-function ask(label) {
-  question ||= `backend-guard: this command ${KIND.data} (${label}). ${RULE}: a database is wiped only when you asked for exactly that - approve it if you did, and check which database it points at first.`;
+const QUESTION = {
+  data: (label) => `backend-guard: this command ${KIND.data} (${label}). ${RULE}: a database is wiped only when you asked for exactly that - approve it if you did, and check which database it points at first.`,
+  reveal: (label) => `backend-guard: this command prints secret values (${label}). ${RULE}: a secret is never read or printed - approve it only if you asked for exactly that.`,
+  large: (label) => `backend-guard: a recursive grep over ${label} - the tree is too large to check for secret files; name the folders or add --exclude. ${RULE}: approve it only if no env file or key sits under it.`,
+  remote: (label) => `backend-guard: this command reaches another machine (${label}). ${RULE}: nothing the agent runs leaves the machine unasked - approve it only if you asked for exactly this, and check which host it is first.`,
+};
+function ask(label, kind = 'data') {
+  question ||= QUESTION[kind](label);
 }
 
 async function readStdin() {
@@ -232,18 +373,35 @@ function absolute(target, cwd) {
   return path.resolve(cwd, native);
 }
 
-// The frozen files git tracks at the path, under it or matching its glob. The agent neither commits nor stages, so
-// what git tracks the owner put there; a migration the task itself wrote is not tracked yet. Any failure - no
-// repo, a folder that does not exist - reads as "none", which allows the call.
-function trackedFrozen(target, cwd) {
+const git = (cwd, args, input) =>
+  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 });
+
+// The upstream default branch: origin/HEAD, else origin/main, else origin/master; '' when there is none.
+function upstreamRef(dir) {
+  for (const ref of ['refs/remotes/origin/HEAD', 'refs/remotes/origin/main', 'refs/remotes/origin/master']) {
+    try {
+      return git(dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim();
+    } catch {
+      // Not there: the next one.
+    }
+  }
+  return '';
+}
+
+// Whether a frozen file git tracks at the path, under it or matching its glob is on the upstream default branch:
+// a migration committed on the working branch only is still the developer's to fix before the merge. With no
+// remote, every tracked one counts - the agent neither commits nor stages, so what git tracks the owner put there.
+// Any failure - no repo, a folder that does not exist - reads as "none", which allows the call.
+function frozenAt(target, cwd) {
   const file = absolute(target, cwd);
+  const dir = path.dirname(file);
   try {
-    const listed = execFileSync('git', ['-C', path.dirname(file), 'ls-files', '-z', '--full-name', '--', normalized(file)], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
-    });
-    return listed.split('\0').some((tracked) => tracked && isFrozenPath(`/${tracked}`));
+    const tracked = git(dir, ['ls-files', '-z', '--full-name', '--', normalized(file)]).split('\0').filter((name) => name && isFrozenPath(`/${name}`));
+    if (!tracked.length) return false;
+    const ref = upstreamRef(dir);
+    if (!ref) return true;
+    const found = git(dir, ['cat-file', '--batch-check'], tracked.map((name) => `${ref}:${name}\n`).join(''));
+    return found.split('\n').some((line) => line && !line.endsWith(' missing'));
   } catch {
     return false;
   }
@@ -257,7 +415,7 @@ function secretRefusal(target, how) {
 
 function frozenRefusal(target, how) {
   deny(
-    `Blocked by .claude/hooks/backend-guard.mjs: ${target} is a committed migration (FROZEN_PATHS) and this call would ${how} it. ${RULE}: other environments have already applied it - write a new migration instead. If it was never applied anywhere, the owner changes it.`,
+    `Blocked by .claude/hooks/backend-guard.mjs: ${target} is a merged migration (FROZEN_PATHS) and this call would ${how} it. ${RULE}: other environments have already applied it - write a new migration instead. If it was never applied anywhere, the owner changes it.`,
   );
 }
 
@@ -269,7 +427,7 @@ function checkWrite(target, cwd) {
   if (typeof target !== 'string' || !target) return;
   if (isSecret(target)) secretRefusal(target, 'write');
   // The path test first: it is free, and git is then asked about migration files only.
-  if (isFrozenPath(absolute(target, cwd)) && trackedFrozen(target, cwd)) frozenRefusal(target, 'edit');
+  if (isFrozenPath(absolute(target, cwd)) && frozenAt(target, cwd)) frozenRefusal(target, 'edit');
 }
 
 // SQL a database client reads on stdin - a heredoc body, an echo or printf piped into it - is its statement too.
@@ -401,22 +559,69 @@ function segmentsOf(command, shell) {
   return segments;
 }
 
-// `grep -r` does not read the ignore file: over a folder that holds an env file it prints the file's lines.
-function checkRecursiveGrep(words, names, reader, cwd) {
-  if (!GREPS.has(names[reader]) || !words.some((word) => RECURSIVE.test(word)) || words.some((word) => SCOPED.test(word))) return;
-  const plain = words.filter((word, index) => index > reader && !word.startsWith('-') && !EXPRESSION.test(words[index - 1] ?? ''));
-  const folders = words.some((word) => EXPRESSION.test(word)) ? plain : plain.slice(1);
-  for (const folder of folders.length ? folders : ['.']) {
+// A glob as grep's --include / --exclude reads it, against a base name; one brace group is expanded.
+function globTest(glob) {
+  const brace = /^(.*)\{([^{}]*)\}(.*)$/.exec(glob);
+  const forms = brace ? brace[2].split(',').map((part) => brace[1] + part + brace[3]) : [glob];
+  const patterns = forms.map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`));
+  return (name) => patterns.some((pattern) => pattern.test(name));
+}
+
+// The first secret file a recursive grep reads under the folder, breadth first, past node_modules and .git; at the
+// entry cap, TOO_LARGE - whatever lies beyond it is unknown.
+function secretUnder(folder, filters) {
+  const queue = [folder];
+  let seen = 0;
+  for (let at = 0; at < queue.length; at += 1) {
     let entries = [];
     try {
-      entries = readdirSync(absolute(folder, cwd));
+      entries = readdirSync(queue[at], { withFileTypes: true });
     } catch {
       continue;
     }
-    const secret = entries.find((entry) => isSecret(entry));
-    if (secret) {
+    for (const entry of entries) {
+      if ((seen += 1) > WALK_CAP) return TOO_LARGE;
+      const full = path.join(queue[at], entry.name);
+      if (entry.isDirectory()) {
+        if (!WALK_SKIP.has(entry.name) && !filters.excludeDir.some((test) => test(entry.name))) queue.push(full);
+      } else if (
+        isSecret(full) &&
+        (!filters.include.length || filters.include.some((test) => test(entry.name))) &&
+        !filters.exclude.some((test) => test(entry.name))
+      ) {
+        return full;
+      }
+    }
+  }
+  return '';
+}
+
+// `grep -r` does not read the ignore file: under a folder that holds an env file, at any depth, it prints the
+// file's lines - unless an --exclude, an --exclude-dir or an --include keeps that file out.
+function checkRecursiveGrep(words, names, reader, cwd) {
+  if (!GREPS.has(names[reader]) || !words.some((word) => RECURSIVE.test(word))) return;
+  const filters = { include: [], exclude: [], excludeDir: [] };
+  const plain = [];
+  let patternGiven = false;
+  for (let index = reader + 1; index < words.length; index += 1) {
+    const word = words[index];
+    const filter = GREP_FILTER.exec(word);
+    if (filter) {
+      const value = filter[2] ?? words[(index += 1)] ?? '';
+      filters[{ include: 'include', exclude: 'exclude', 'exclude-dir': 'excludeDir' }[filter[1].toLowerCase()]].push(globTest(value));
+    } else if (GREP_VALUE.test(word)) {
+      if (/^(?:-[A-Za-z]*[ef]|--regexp|--file)$/.test(word)) patternGiven = true;
+      index += 1;
+    } else if (/^(?:--regexp|--file)=/.test(word)) patternGiven = true;
+    else if (!word.startsWith('-')) plain.push(word);
+  }
+  const folders = patternGiven ? plain : plain.slice(1);
+  for (const folder of folders.length ? folders : ['.']) {
+    const secret = secretUnder(absolute(folder, cwd), filters);
+    if (secret === TOO_LARGE) ask(folder, 'large');
+    else if (secret) {
       deny(
-        `Blocked by .claude/hooks/backend-guard.mjs: a recursive grep over ${folder} walks into ${secret}, a secret file (SECRET_PATHS), and prints its lines. ${RULE}: search with the Grep tool or \`git grep\`, which skip ignored files, or name the folders to search.`,
+        `Blocked by .claude/hooks/backend-guard.mjs: a recursive grep over ${folder} walks into ${normalized(path.relative(cwd, secret))}, a secret file (SECRET_PATHS), and prints its lines. ${RULE}: search with the Grep tool or \`git grep\`, which skip ignored files, or name the folders to search.`,
       );
     }
   }
@@ -430,23 +635,37 @@ function checkSegment(words, shell, cwd, depth) {
   // The head keeps its spaces (a quoted path to the binary); so does PowerShell's -ArgumentList, the tool's own
   // words. A shell body is judged below, as a command of its own.
   const blank = (word, index) => /\s/.test(word) && (index !== headAt || /[\r\n]/.test(word)) && !/^-(?:ArgumentList|Args)$/i.test(words[index - 1] ?? '');
-  const bare = words.map((word, index) => (blank(word, index) ? '_' : word)).join(' ');
-  const scopes = { bare, sql: text.replace(/'[^']*'/g, "''") };
+  const bareWords = words.map((word, index) => (blank(word, index) ? '_' : word));
+  const bare = bareWords.join(' ');
+  const scopes = { bare, sql: text.replace(/'[^']*'/g, "''"), words: bareWords };
   // `sls` is Select-String in PowerShell and the serverless CLI everywhere else.
   const quiet = QUIET.has(head) && !(head === 'sls' && /^(?:deploy|remove)$/i.test(words[headAt + 1] ?? ''));
 
   if (!quiet) {
-    for (const { kind, label, scope, pattern } of FORBIDDEN) {
+    for (const { kind, label, scope, pattern, hint } of FORBIDDEN) {
       if (!pattern.test(scopes[scope])) continue;
-      if (kind === 'data') {
-        ask(label);
+      if (kind === 'data' || kind === 'reveal' || kind === 'remote') {
+        ask(label, kind);
         continue;
       }
-      if (kind !== 'project' && (DRY_RUN.test(bare) || LOCAL.test(bare))) continue;
+      if (kind === 'secret') {
+        deny(
+          `Blocked by .claude/hooks/backend-guard.mjs: this command prints secret values (${label}). ${RULE}: a secret is never read, printed or written - list what you need with --services, --volumes, --profiles or --images, or read the compose file itself.`,
+        );
+      }
+      if (kind !== 'project' && (DRY_RUN.test(bare) || LOCAL.test(bare) || localTagsOnly(bareWords))) continue;
       deny(
-        `Blocked by .claude/hooks/backend-guard.mjs: this command ${KIND[kind]} (${label}). ${RULE}: nothing the agent runs leaves the machine - name the command and what it would do, and the owner runs it.`,
+        `Blocked by .claude/hooks/backend-guard.mjs: this command ${KIND[kind]} (${label}). ${RULE}: nothing the agent runs leaves the machine - name the command and what it would do, and the owner runs it.${hint ? ` ${hint}` : ''}`,
       );
     }
+  }
+
+  // An interpreter one-liner that names a secret file reads it: `node -e "...readFileSync('.env')"`.
+  const interpreter = names.findIndex((name) => INTERPRETERS.test(name));
+  if (interpreter !== -1) {
+    words.forEach((word, index) => {
+      if (index > interpreter && CODE_FLAG.test(words[index - 1] ?? '')) checkCodeLiterals(word);
+    });
   }
 
   const reader = names.findIndex((name) => READERS.has(name));
@@ -484,7 +703,7 @@ function checkSegment(words, shell, cwd, depth) {
 
   if (FROZEN_PATHS.length && (names.some((name) => REMOVERS.has(name)) || (names.includes('find') && words.includes('-delete')))) {
     for (const word of words) {
-      if (!word.startsWith('-') && trackedFrozen(word, cwd)) frozenRefusal(word, 'delete or move');
+      if (!word.startsWith('-') && frozenAt(word, cwd)) frozenRefusal(word, 'delete or move');
     }
   }
 
@@ -503,9 +722,19 @@ function checkSegment(words, shell, cwd, depth) {
   }
 }
 
+// The string literals of a piece of code: one that names a secret file is a read of it.
+function checkCodeLiterals(code) {
+  for (const [, , value] of code.matchAll(/(["'`])((?:\\.|(?!\1)[^\\])*)\1/g)) {
+    if (value && reaches(value)) secretRefusal(value, 'read');
+  }
+}
+
 function checkCommand(command, shell, cwd, depth) {
   const { outer, bodies } = withoutSubstitutions(depth === 0 ? withoutHeredocs(command) : command, shell);
   if (depth < MAX_DEPTH) for (const body of bodies) checkCommand(body, shell, cwd, depth + 1);
+  noteDockerAssignments(outer);
+  // A .NET file call reads or writes the path it names: `[IO.File]::ReadAllText('.env')`.
+  for (const [call] of outer.matchAll(/\[(?:System\.)?IO\.File\]::\w+\s*\([^)]*\)/gi)) checkCodeLiterals(call);
   // `< file` feeds the file to whatever reads stdin; `<<` is a heredoc and `<(` a process substitution. A quoted
   // string with a space in it is a statement or a message, where `<` compares.
   const unquoted = outer.replace(/"[^"]*\s[^"]*"|'[^']*\s[^']*'/g, '""');

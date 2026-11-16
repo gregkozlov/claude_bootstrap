@@ -9,6 +9,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+if (typeof path.posix.matchesGlob !== 'function') {
+  console.error(`rules-reach needs Node 20.17+ or 22.5+ (path.matchesGlob); this is ${process.version}`);
+  process.exit(1);
+}
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RULES = path.join(ROOT, '.claude', 'rules');
 const RULE_BUDGET = 20 * 1024;
@@ -19,7 +24,7 @@ const LS_FILES = ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-sta
 const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`;
 
 let listed;
-const listedFiles = () => (listed ??= [...new Set(execFileSync('git', LS_FILES, { encoding: 'utf8' }).split('\0').filter(Boolean))]);
+const listedFiles = () => (listed ??= [...new Set(execFileSync('git', LS_FILES, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean))]);
 const ancestors = (file) => {
   const parts = file.split('/').slice(0, -1);
   return parts.map((_, i) => parts.slice(0, i + 1).join('/'));

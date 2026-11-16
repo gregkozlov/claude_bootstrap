@@ -1,6 +1,6 @@
-// Example from the example app (React + TypeScript + i18next, en / de). Depends on: translations in
-// public/locales/{en,de}/translation.json, the inline-fallback t('key', 'English') pattern; not part of the template - copy it by hand.
-// Deterministic checks over public/locales/{en,de}/translation.json against src/ - the i18n agent's tool.
+// Example from the example app (React + TypeScript + i18next, en / fr). Depends on: translations in
+// public/locales/{en,fr}/translation.json, the inline-fallback t('key', 'English') pattern; not part of the template - copy it by hand.
+// Deterministic checks over public/locales/{en,fr}/translation.json against src/ - the i18n agent's tool.
 //   node .claude/scripts/i18n-check.mjs            parity, keys referenced in code (a literal `t()` / `i18nKey` /
 //                                                  route `titleKey`) but missing from a file, and literal inline
 //                                                  English fallbacks that differ from `en`
@@ -12,7 +12,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const LANGS = ['en', 'de'];
+const LANGS = ['en', 'fr'];
 const WANT_ORPHANS = process.argv.includes('--orphans');
 
 const load = (lang) => JSON.parse(readFileSync(join(REPO, 'public', 'locales', lang, 'translation.json'), 'utf8'));
@@ -86,8 +86,8 @@ const fail = (msg) => {
 
 // 1. Parity
 for (const [a, b] of [
-  ['en', 'de'],
-  ['de', 'en'],
+  ['en', 'fr'],
+  ['fr', 'en'],
 ]) {
   for (const [key, type] of tables[a]) {
     if (!tables[b].has(key)) fail(`missing in ${b}: ${key}`);
@@ -111,19 +111,19 @@ for (const [key, { file, text }] of fallbacks) {
 }
 
 // 4. Placeholder parity (warning, never a failure): the two files must interpolate the same names, or the
-// German prints a literal `{{count}}` to the user. A warning so that the first run over an already drifted
+// French prints a literal `{{count}}` to the user. A warning so that the first run over an already drifted
 // file does not block a turn.
 const placeholders = (value) => (typeof value === 'string' ? [...value.matchAll(/\{\{\s*([\w.]+)/g)].map((m) => m[1]).sort() : []);
 const placeholderWarnings = [];
 for (const [key, value] of strings.en) {
-  if (!strings.de.has(key)) continue;
+  if (!strings.fr.has(key)) continue;
   const en = placeholders(value).join(',');
-  const de = placeholders(strings.de.get(key)).join(',');
+  const fr = placeholders(strings.fr.get(key)).join(',');
   const show = (list) => (list ? `{{${list.split(',').join('}} {{')}}}` : 'none');
-  if (en !== de) placeholderWarnings.push(`  ${key}\n    en: ${show(en)}  de: ${show(de)}`);
+  if (en !== fr) placeholderWarnings.push(`  ${key}\n    en: ${show(en)}  fr: ${show(fr)}`);
 }
 if (placeholderWarnings.length > 0) {
-  console.log(`\nwarning - ${placeholderWarnings.length} key(s) interpolate different placeholders in en and de:`);
+  console.log(`\nwarning - ${placeholderWarnings.length} key(s) interpolate different placeholders in en and fr:`);
   for (const line of placeholderWarnings) console.log(line);
 }
 
@@ -144,7 +144,7 @@ if (WANT_ORPHANS) {
 
 console.log(
   failures
-    ? `\n${failures} failure(s) - ${tables.en.size} en keys, ${tables.de.size} de keys, ${referenced.size} literal keys referenced in code, ${fallbacks.size} inline fallbacks compared`
-    : `OK - ${tables.en.size} en keys, ${tables.de.size} de keys in parity, all ${referenced.size} literal keys referenced in code present in both, ${fallbacks.size} inline fallbacks match en`
+    ? `\n${failures} failure(s) - ${tables.en.size} en keys, ${tables.fr.size} fr keys, ${referenced.size} literal keys referenced in code, ${fallbacks.size} inline fallbacks compared`
+    : `OK - ${tables.en.size} en keys, ${tables.fr.size} fr keys in parity, all ${referenced.size} literal keys referenced in code present in both, ${fallbacks.size} inline fallbacks match en`
 );
 process.exit(failures ? 1 : 0);
