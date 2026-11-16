@@ -5,16 +5,22 @@ For whoever changes this bootstrap. An adopter needs only `README.md`; the model
 ## How it relates to the other layers
 
 - It was cut from [full-frontend](../claude-bootstrap-full-frontend/README.md) for a ~20 USD plan. [light-backend](../claude-bootstrap-light-backend/README.md) is this layer retargeted at a server codebase.
-- **Byte-identical files - change them in every copy and confirm with `cmp`:**
-  - `template/.claude/skills/maintain-ai-layer/references/init.md` and `references/settled.md`, with the full layer. `init.md` names units this layer lacks (`lifecycle`, `crosscheck`, `verify-live`) on purpose: it runs a step only when the unit exists.
-  - `template/.claude/skills/handoff/SKILL.md` and `retro/SKILL.md`, with the light backend layer.
-- `guard.mjs` and its two test suites follow the full layer's; the hook differs only in a comment about the write fence (below). The guard costs no tokens - it runs locally - so it is the one part that was not trimmed.
+- The guard costs no tokens - it runs locally - so it is the one part that was not trimmed.
+
+## Byte-identical files
+
+An edit to one of these is made in every copy, and `cmp` proves it. Paths are under `template/.claude/`.
+
+- **All three layers:** `hooks/tests/guard-test.mjs`, `hooks/tests/guard-shell-test.mjs`, `hooks/upkeep-nudge.mjs`, `hooks/tests/upkeep-nudge-test.mjs`, `skills/maintain-ai-layer/layer-refs.mjs`, `skills/maintain-ai-layer/references/settled.md`.
+- **Full and light frontend:** also `skills/maintain-ai-layer/references/init.md`. It names units this layer lacks (`lifecycle`, `crosscheck`, `verify-live`) on purpose: it runs a step only when the unit exists.
+- **Light frontend and light backend:** also `hooks/guard.mjs`, `skills/handoff/SKILL.md`, `skills/retro/SKILL.md`.
+- `hooks/guard.mjs` in the full layer differs from the light layers' copy in comment lines only, about the write fence (below): a code change to it goes into all three.
 
 ## The numbers that must agree
 
 - **The launch count per task**, "usually 1-2, at most 5" (`hunt` on the plan, `hunt` on the diff, a second `hunt` round, `drift`, `Explore`). It is stated in `template/CLAUDE.md` "Development Workflow", in `README.md` "What it costs" and checked by `maintain-ai-layer/references/deep.md` D6. Change all three together.
-- **The `CLAUDE.md` budget**: 20 KB by `wc -c`. The layer's own text is about 11.4 KB (`grep -v "^\[fill\]" template/CLAUDE.md | wc -c`), which leaves the project about 8 KB. Keep the template near 12 KB.
-- **The upkeep pace**: `upkeep-nudge.mjs` asks after 30 days, and `deep` is the default mode it points to.
+- **The `CLAUDE.md` budget**: 20 KB by `wc -c`. The layer's own text is about 11.6 KB (`grep -v "^\[fill\]" template/CLAUDE.md | wc -c`), which leaves the project about 8 KB. Keep the template near 13 KB.
+- **The upkeep pace**: `upkeep-nudge.mjs` asks after 30 days, and `deep` is the mode a bare `/maintain-ai-layer` runs once `CLAUDE.md` has no `[fill]` line left.
 
 ## What it drops, against the full layer
 

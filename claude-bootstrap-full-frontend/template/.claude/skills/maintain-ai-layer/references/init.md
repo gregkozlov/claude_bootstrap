@@ -4,7 +4,7 @@ Turns a freshly installed layer into **this** project's layer: the project secti
 
 How it differs from the other modes: `rules` works on the rule set alone, without `CLAUDE.md` and without tuning the units; `deep` audits every file of the layer as it stands. `init` reads the project first and writes the project-specific parts: `CLAUDE.md`, the rules and the unit tuning. It runs the `rules` steps by reference and does not restate them.
 
-This file is the same in every layer this bootstrap ships, so where the layers differ it says what to do by what exists: run a step on a unit or script only when the layer has it, and skip it with one line in the run file when it does not. A path below that starts with `agents/`, `skills/`, `scripts/` or `docs/` is under `.claude/` and may be absent from this layer. Every standing rule of `SKILL.md` holds, and so does its "Record the run". The survey below is the same size in every layer - a cheap layer saves launches elsewhere, never here, since a rule set built on a thin survey costs every later session.
+This file is the same in the full and light frontend layers, so where the layers differ it says what to do by what exists: run a step on a unit or script only when the layer has it, and skip it with one line in the run file when it does not. A path below that starts with `agents/`, `skills/`, `scripts/` or `docs/` is under `.claude/` and may be absent from this layer. Every standing rule of `SKILL.md` holds, and so does its "Record the run". The survey below is the same size in every layer - a cheap layer saves launches elsewhere, never here, since a rule set built on a thin survey costs every later session.
 
 ## I1. Survey
 
@@ -46,13 +46,14 @@ Read `references/rules.md` "Writing a rule" first, and measure every rule the wa
 
 The units the layer ships carry `[fill]` lines and generic defaults that only the project can settle. For each one below that exists in this layer, write it from I1's facts; skip it, with one line in the run file, when it does not exist:
 
-- `agents/hunt.md` - keep the shape of the attack angles; delete the classes the stack cannot produce, and add one per defect class I1 (d) found fixed twice, each as a concrete check.
+- `agents/hunt.md` - keep the shape of the attack angles; delete the classes the stack cannot produce, and add one per defect class I1 (d) found fixed twice, each as a concrete check. Where its Boundaries carry the compile-probe `[fill]`: a project without TypeScript deletes the probe and everything that line names; one with it deletes the line.
 - `agents/twins.md` - the known twins: code that exists in two or more places on purpose and must change together (I1 b).
-- `agents/comments.md` - the artefacts other agents own.
+- `agents/comments.md` - the artefacts other agents own; the `[fill]` of its lint step: the project's lint command for a file list, with its allow entry for the settings file that registers the layer named in the report (settings are the owner's) - or the step deleted where the check command already lints.
 - `skills/lifecycle/SKILL.md` - the project's own editor agents at step 4 with their conditions, or the clause deleted; the source and config paths in its re-entry rule.
 - `skills/crosscheck/SKILL.md` - the tier triggers, tuned to the classes that produced a runtime bug here (I1 d); a class the project cannot have is deleted. A trigger list copied wholesale sends every change to the top tier.
-- `skills/verify-live/SKILL.md` - every `[fill]` line, and the `Browser check:` line of `CLAUDE.md` when the install left it `[fill]`: `off` unless the Claude in Chrome extension is installed and the marker endpoint answers (an I5 question when unsure). **No browser UI:** delete this skill and `scripts/dev-servers.mjs`, the "running app" and "Browser check" paragraphs of `CLAUDE.md`, and rewrite the browser-check step of the lifecycle and the reproduction step of `debug` as the command that exercises the change; fix every other reference `layer-refs` then reports, and name the `settings.json` allow entries for `dev-servers.mjs` in the report (settings are the owner's). A browser project still needs the marker endpoint the skill reads, a source change the owner makes - name it in the report.
+- `skills/verify-live/SKILL.md` - every `[fill]` line, and the `Browser check:` line of `CLAUDE.md`: a first install writes `off`, and it becomes `on` only when the Claude in Chrome extension is installed and the marker endpoint answers (an I5 question when unsure). **No browser UI:** delete this skill and `scripts/dev-servers.mjs`, the "running app" and "Browser check" paragraphs of `CLAUDE.md`, and rewrite the browser-check step of the lifecycle and the reproduction step of `debug` as the command that exercises the change; fix every other reference `layer-refs` then reports, and name the `settings.json` allow entries for `dev-servers.mjs` in the report (settings are the owner's). A browser project still needs the marker endpoint the skill reads, a source change the owner makes - name it in the report.
 - `scripts/run-pure.mjs` and `scripts/run-pure-hooks.mjs` - they run a TypeScript or JavaScript module under Node; a project in another language deletes both, with the sentences of `hunt` and `debug` that call them.
+- `scripts/run-pure-hooks.mjs` (where the layer has it) - `ALIASES`: the import aliases from the tsconfig `paths` / bundler config.
 - `references/rules.md` - R5's three source areas, where they are a `[fill]`.
 - `layer-refs.mjs` - `PREFIXES`: the project's other top-level folders a doc names by path.
 - Every other `[fill]` the step-I1 grep found under `.claude/`.
@@ -66,7 +67,7 @@ What the repo could not answer goes to the owner once, after I2-I4, as `AskUserQ
 ```bash
 L=$(grep -l "Layer tracking" CLAUDE.md .claude/CLAUDE.md 2>/dev/null)   # the layer's CLAUDE.md
 grep -n "\[fill\]" "$L"; grep -rn "\[fill\]" .claude          # none left but the ones I5 left open, and the mentions of the marker in maintain-ai-layer's own SKILL.md and init.md
-grep -rn "<[A-Z][A-Z_]\{2,\}>" CLAUDE.md .claude --exclude-dir=sessions   # no unfilled placeholder
+grep -rn "<[A-Z][A-Z_]\{2,\}>" "$L" .claude --exclude-dir=sessions --exclude-dir=.git   # no unfilled placeholder
 node .claude/skills/maintain-ai-layer/layer-refs.mjs                # every hit explained
 wc -c "$L"                                                         # inside the budget
 ```
@@ -75,4 +76,4 @@ Plus `node .claude/scripts/rules-reach.mjs --check` and its report when the scri
 
 The report, in the user's language: what the survey read; the `CLAUDE.md` sections written and the ones corrected; the rules created, updated, split and deleted, and the knowledge added, each with the evidence it stands on (sites or a commit); the candidates rejected, each with the condition it failed; the units tuned and the ones skipped; the questions with their answers or assumed defaults; the numbers before and after (`CLAUDE.md` bytes, rule count and bytes, reach); and what is left to the owner (the marker endpoint, a hook or settings change).
 
-Last, write today's date (`YYYY-MM-DD`, the only line) into the gitignored `.claude/.last-maintain` with `Write`: the layer was just checked against the repo, and `upkeep-nudge.mjs` counts the days to the next pass from it.
+Last, write today's date (`YYYY-MM-DD`, the only line) into `.claude/.last-maintain` with `Write` - committed with the layer in team mode, per machine in a personal one: the layer was just checked against the repo, and `upkeep-nudge.mjs` counts the days to the next pass from it. In team mode the stamp is one more file for the owner to commit.

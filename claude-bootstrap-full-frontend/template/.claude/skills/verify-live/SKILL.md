@@ -44,7 +44,7 @@ Then prove the marker from the shell, before touching the browser:
 curl -s -m 5 http://localhost:<port><DEV_BASE_PATH>__tree
 ```
 
-It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the bootstrap's README asked the project to add - `examples/tree-marker-plugin.ts` in the bootstrap folder is the Vite version). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` instead - ask the user to restart it.
+It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the bootstrap's README asked the project to add - `examples/tree-marker-plugin.ts` in the bootstrap repository is the Vite version). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` instead - ask the user to restart it.
 
 ## 3. Which browser - proved, not assumed
 
@@ -63,7 +63,7 @@ On every surface the diff reaches - a shared component means every call site tha
 - Navigate to the surface; accessibility snapshot of the changed element, not the whole page; screenshot.
 - `read_console_messages` with a pattern for the surface. [fill] Name the known console noise here so it is not reported as new.
 - `read_network_requests`: does the request leave with the right params - and, on a mutation, the full body the endpoint replaces the record with - and does the response carry the shape and scale the UI assumes.
-- Loading / error / empty branches where the change has them ([fill] the project's forced-state switch, if it has one); every locale where strings or formatting moved; the largest font size where widths are fixed; open and close every overlay the change touches and check focus lands back on the trigger with a clean console.
+- Loading / error / empty branches where the change has them ([fill] the project's forced-state switch, if it has one); every locale where strings or formatting moved; another zoom level or font size where widths are fixed; open and close every overlay the change touches and check focus lands back on the trigger with a clean console.
 - A `screenshot` can time out after an in-app Back / Forward, so read overlay state with `javascript_tool` over `[role=dialog]` instead.
 - **The driven tab is usually hidden** - `document.visibilityState === 'hidden'` while the browser sits behind the terminal, even with `document.hasFocus()` true. `requestAnimationFrame` then stops after one tick, canvas and animation libraries do not paint, and a data-fetching library may pause its retries while hidden, so an error state can read as an empty one - read the query state before calling it a bug. Time a transition with a `MutationObserver` on `document.body` (`childList`, `subtree`, the `style` / `class` / `inert` attributes), which DOM commits fire regardless; a canvas-only or animation question goes to the user.
 - A script-driven `el.focus()` does not set the component library's focused-state class while the browser window lacks OS focus, which reads exactly like a broken focus style: check `document.hasFocus()` first, or click through the `computer` tool.

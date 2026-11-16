@@ -6,8 +6,9 @@
 //                                edited, the change is a new migration.
 //   Bash / PowerShell          - a command that prints or copies a secret file, one that deletes or moves a frozen
 //                                file, and one that deploys, changes infrastructure or publishes (FORBIDDEN, plus the
-//                                project's own list). A command that destroys data, prints a cluster secret or opens
-//                                a shell or a copy to another host is not refused: the user is asked.
+//                                project's own list). A command that destroys data, prints a secret from a cluster
+//                                or a cloud store, or opens a shell or a copy to another host is not refused: the
+//                                user is asked.
 // It is a separate file so that guard.mjs stays the same file in every layer of this bootstrap.
 // Reads one JSON payload on stdin. Exit 2 with the reason on stderr blocks the call; exit 0 allows it; exit 0 with
 // a permissionDecision of "ask" on stdout hands the call to the user's permission prompt.
@@ -23,14 +24,18 @@ import path from 'node:path';
 // leaves the built-in checks working; anything else is parsed for real, and a hook that throws allows every call -
 // run the self-test after editing one.
 //   frozen    - tested against the absolute file path with every backslash turned into "/", so it matches the
-//               path's tail and never starts with "^", e.g. ["db/migrations/[^/]+\\.sql$"].
-//   secret    - the same, case-insensitive, on top of SECRET_PATHS below, e.g. ["config/local\\.settings\\.json$"].
-//   forbidden - tested against one command segment, words joined by single spaces, e.g. ["\\bmake\\s+deploy\\b"].
+//               path's tail and never starts with "^", e.g. ["db/migrations/[^/]+\\.sql$"]. Case-insensitive on
+//               Windows and macOS, where `Db/Migrations/001.sql` is the same file.
+//   secret    - the same, case-insensitive everywhere, on top of SECRET_PATHS below, e.g.
+//               ["config/local\\.settings\\.json$"].
+//   forbidden - tested against one command segment, words joined by single spaces, e.g.
+//               ["\\bmake\\s+deploy(?!\\S)"] - a `\\b` after the target would take `make deploy-docs` with it.
 const FROZEN_RAW = String.raw`<FROZEN_PATHS>`;
 const SECRET_RAW = String.raw`<SECRET_PATHS>`;
 const FORBIDDEN_RAW = String.raw`<FORBIDDEN_COMMANDS>`;
 const sources = (raw) => (raw.startsWith('<') || !raw.trim() ? [] : JSON.parse(raw));
-const FROZEN_PATHS = sources(FROZEN_RAW).map((source) => new RegExp(source));
+const FOLD = process.platform === 'win32' || process.platform === 'darwin';
+const FROZEN_PATHS = sources(FROZEN_RAW).map((source) => new RegExp(source, FOLD ? 'i' : ''));
 
 // Files whose content is a secret. A name that says it is an example (example, sample, template, dist, defaults)
 // holds names and placeholders and stays readable; so does a key or certificate whose name says it is public, a
@@ -92,12 +97,18 @@ const SQL_DROP = String.raw`\b(?:DROP\s+(?:DATABASE|SCHEMA|TABLE|COLUMN|INDEX|VI
 const SQL_UNBOUNDED = String.raw`\b(?:DELETE\s+FROM|UPDATE\s+\S+(?:\s+(?:AS\s+)?\w+)?\s+SET)\b(?![^;]*\bWHERE\b)`;
 const SQL_CLIENT = new RegExp(tool(SQL_CLIENTS), 'i');
 const SQL_WIPE = new RegExp(`${SQL_DROP}|${SQL_UNBOUNDED}`, 'i');
-// A read (`start-query`, `update-kubeconfig`) and a download (`sync s3://bucket ./local`) are not writes.
+// A copy that names the bucket after its source writes to it, from the disk or from another bucket; one that
+// names the bucket first is a download.
+const upload = (verbs, target) => String.raw`(?:${verbs})\s+(?:-\S+\s+)*[^-\s]\S*\s+(?:\S+\s+)*?${target}\S*`;
+const REMOTE_URL = String.raw`https?:\/\/(?!(?:localhost|127\.0\.0\.1|\[::1\])(?=[:\/\s]|$))`;
+// A read is not a write: `start-query`, `update-kubeconfig`, `admin-get-user`.
 const AWS_WRITE =
-  String.raw`(?:delete|terminate|remove|put|create|run|stop|reboot|modify|deregister|register|attach|detach|publish|send|invoke|deploy|restore|purge|reset|revoke|authorize|associate|disassociate|import|execute)-[\w-]+|start-(?!query|live-tail)[\w-]+|update-(?!kubeconfig)[\w-]+|batch-(?:write|delete|execute)-[\w-]+|rm|rb|mb|mv|deploy|invoke|publish|(?:cp|sync)\s+(?:-\S+\s+)*(?!s3:)[^-\s]\S*\s+(?:-\S+\s+)*s3://\S*`;
+  String.raw`(?:delete|terminate|remove|put|create|run|stop|reboot|modify|deregister|register|attach|detach|publish|send|invoke|deploy|restore|purge|reset|revoke|authorize|associate|disassociate|import|execute|add|set|change|enable|disable|submit|copy|allocate|release|promote|failover|rotate|cancel|schedule|tag|untag)-[\w-]+|admin-(?!get-|list-)[\w-]+|start-(?!query|live-tail)[\w-]+|update-(?!kubeconfig)[\w-]+|batch-(?:write|delete|execute)-[\w-]+|rm|rb|mb|mv|deploy|invoke|publish|` +
+  upload('cp|sync', 's3://');
+const localCluster = (flag) => `On a local cluster, retry with ${flag} kind-<name> (or minikube, docker-desktop).`;
 const FORBIDDEN = [
-  rule('deploy', 'kubectl', tool('kubectl|oc') + first(String.raw`apply|delete|patch|replace|scale|rollout\s+(?:restart|undo|pause|resume)|drain|cordon|uncordon|taint|edit|set|create|annotate|label|exec|debug|cp|run|expose|autoscale|config\s+(?:use-context|set-context|delete-context|set-cluster|set-credentials|set)`)),
-  rule('deploy', 'helm', tool('helm|helmfile') + first('install|upgrade|uninstall|delete|rollback|push|apply|sync|destroy')),
+  rule('deploy', 'kubectl', tool('kubectl|oc') + first(String.raw`apply|delete|patch|replace|scale|rollout\s+(?:restart|undo|pause|resume)|drain|cordon|uncordon|taint|edit|set|create|annotate|label|exec|debug|cp|run|expose|autoscale|config\s+(?:use-context|set-context|delete-context|set-cluster|set-credentials|set)`), 'bare', localCluster('--context')),
+  rule('deploy', 'helm', tool('helm|helmfile') + first('install|upgrade|uninstall|delete|rollback|push|apply|sync|destroy'), 'bare', localCluster('--kube-context')),
   rule('deploy', 'terraform', tool('terraform|tofu|terragrunt') + then(String.raw`apply|destroy|import|taint|untaint|force-unlock|state\s+(?:rm|mv|push)|workspace\s+(?:new|delete)`)),
   rule('deploy', 'pulumi', tool('pulumi') + then('up|destroy|refresh|import|cancel')),
   rule('deploy', 'ansible-playbook', tool('ansible-playbook') + without('--check|--syntax-check|--list-hosts|--list-tasks|--version|--help')),
@@ -105,13 +116,15 @@ const FORBIDDEN = [
   rule('deploy', 'a deploy tool', tool('cap') + String.raw`(?:\s+\S+)?\s+deploy(?::[\w:]+)?(?=\s|$)` + '|' + tool('copilot') + then('deploy|delete') + '|' + tool('func') + String.raw`\s+azure\s+functionapp\s+publish(?=\s|$)`),
   rule('deploy', 'serverless', tool('sls') + first('deploy|remove')),
   rule('deploy', 'cf', tool('cf') + first('push|delete|delete-space')),
-  rule('deploy', 'skaffold deploys to the current kube context', tool('skaffold') + first('run|dev|deploy|delete'), 'bare', 'On a local cluster, retry with --kube-context kind-<name> (or minikube, docker-desktop).'),
+  rule('deploy', 'skaffold deploys to the current kube context', tool('skaffold') + first('run|dev|deploy|delete'), 'bare', localCluster('--kube-context')),
   rule('deploy', 'a deploy tool', tool('argocd') + String.raw`\s+app\s+(?:sync|delete|create|set|rollback)(?=\s|$)` + '|' + tool('supabase') + then('deploy')),
   rule('deploy', 'eksctl', tool('eksctl') + first('create|delete|upgrade|scale')),
   // The operation is the word after the service: `--function-name create-order` is a name.
   rule('deploy', 'aws', tool('aws') + first(String.raw`(?![-+])\S+` + first(AWS_WRITE))),
-  rule('deploy', 'gcloud', tool('gcloud') + String.raw`(?!\s+(?:components|config)\s)` + then('deploy|delete|create|update|apply|submit|import|ssh|scp|add-iam-policy-binding|remove-iam-policy-binding|set-iam-policy|start|stop|reset|resize|rollback')),
-  rule('deploy', 'az', tool('az') + String.raw`(?!\s+account\s)` + then(String.raw`(?:create|delete|upload)(?:-[\w-]+)?|update|up|deploy|start|stop|restart|set|purge|import`)),
+  rule('deploy', 'gcloud', tool('gcloud') + String.raw`(?!\s+(?:components|config)\s)` + then(String.raw`deploy|delete|create|update|apply|submit|import|ssh|scp|execute|patch|publish|enable|disable|update-[\w-]+|set-[\w-]+|add-iam-policy-binding|remove-iam-policy-binding|start|stop|reset|resize|rollback|rm|mv|` + upload('cp|rsync', 'gs://'))),
+  rule('deploy', 'az', tool('az') + String.raw`(?!\s+account\s)` + then(String.raw`(?:create|delete|upload)(?:-[\w-]+)?|update|up|deploy|start|stop|restart|set|purge|import|config-zip|swap|scale|invoke|sync`)),
+  rule('deploy', 'gsutil', tool('gsutil') + first(String.raw`(?:rm|rb|mb|mv)(?=\s.*gs:\/\/)|` + upload('cp|rsync', 'gs://'))),
+  rule('deploy', 'azcopy', tool('azcopy') + first(String.raw`(?:remove|rm|make|mk)(?=\s(?:.*\s)?${REMOTE_URL})|` + upload('copy|cp|sync', REMOTE_URL))),
   rule('deploy', 'a hosting CLI', tool('fly|flyctl|netlify|railway|firebase|wrangler') + then(String.raw`deploy|publish|destroy|launch|scale|up|down|secrets?\s+(?:set|unset|import|put|delete)`)),
   rule('deploy', 'vercel', tool('vercel') + String.raw`(?!\s+(?:build|pull|dev|env|login|logout|whoami|ls|list|logs|inspect|link|help)(?=\s|$))` + then('deploy|promote|rollback|remove|rm|--prod') + '|' + HEAD + String.raw`vercel(?:\s+(?!--version|--help|-v|-h)-\S+)*\s*$`),
   rule('deploy', 'heroku', tool('heroku') + then(String.raw`run(?::\w+)?|restart|rollback|[\w-]+:(?:destroy|reset|rollback|restart|scale|promote|push|set|unset|create|add|remove|kill|release)[\w:-]*`)),
@@ -154,6 +167,11 @@ const FORBIDDEN = [
   rule('secret', 'compose config prints the interpolated env values', String.raw`^(?!(?=.*\s--env-file[= ])(?!.*\s--env-file[= ](?!(?:\S*\/)?[^\s/]*\b(?:example|sample|template|dist|defaults?)\b))).*(?<![\w.-])(?:docker|podman)(?:-|\s+)compose(?=\s)` + first('config|convert') + without(String.raw`--services|--volumes|--profiles|--images|--networks|--hash(?:=\S+)?|-q|--quiet`)),
   // A list of secrets shows names, `describe` byte counts; an output format prints the values.
   rule('reveal', 'a cluster secret', tool('kubectl|oc') + String.raw`(?=.*\s(?:-o\s*|-o=|--output[= ])(?:ya?ml|jsonpath|json|go-template|custom-columns|template)(?=[=\s]|-|$))` + first('get') + String.raw`(?:\s+[-+]\S+(?:\s+(?![-+])\S+)??)*?\s+(?:\S*,)?secrets?(?:[\/,.]\S*)?(?=\s|$)`),
+  // A secret store hands out the value itself; its list of names and its describe pass, and so does a parameter
+  // read with no decryption.
+  rule('reveal', 'a value from a cloud secret store', tool('aws') + first('secretsmanager') + first(String.raw`(?:batch-)?get-secret-value`) + '|' + tool('aws') + first('ssm') + first(String.raw`get-parameter[\w-]*`) + String.raw`(?=.*\s--with-decryption(?=\s|$))`),
+  rule('reveal', 'a value from a cloud secret store', tool('gcloud') + then(String.raw`secrets\s+versions\s+access`) + '|' + tool('az') + then(String.raw`keyvault\s+secret\s+(?:show|download)`)),
+  rule('reveal', "the app's config vars", tool('heroku') + first(String.raw`config(?::get)?`)),
 
   rule('data', 'compose down with its volumes', String.raw`(?<![\w.-])(?:docker|podman)(?:-|\s+)compose(?=\s)` + first('down') + String.raw`(?=.*\s(?:-v|--volumes)(?=\s|$))`),
   rule('data', 'a volume or system prune', tool('docker|podman') + String.raw`\s+(?:volume\s+(?:rm|prune)|system\s+prune)(?=\s|$)`),
@@ -188,14 +206,14 @@ const KIND = {
 };
 // A dry run reaches nothing, and neither does a call aimed at this machine: an emulator behind a localhost
 // endpoint, the gcloud emulators, a cluster named as a local one, a registry on localhost (the image a push names
-// last, or every tag of a `--push` build). They pass the deploy and publish rules; a kubectl call that names no
-// context is not known to be local and does not.
+// last, or every tag of a `--push` build). They pass the deploy and publish rules, and so does a switch to a local
+// context; a kubectl call that names no context is not known to be local and does not.
 const DRY_RUN = /\s--dry-run(?:=(?!none|false)\S+)?(?=\s|$)/i;
 const LOCAL = new RegExp(
   [
     String.raw`\s--endpoint-url[= ]https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|host\.docker\.internal|localstack)(?::\d+)?(?=[\/\s]|$)`,
     String.raw`(?:^|\s)gcloud(?:\s+(?:alpha|beta))?\s+emulators\s`,
-    String.raw`\s--(?:kube-)?context[= ](?:kind-[\w.-]+|k3d-[\w.-]+|minikube|docker-desktop|rancher-desktop|colima|orbstack)(?=\s|$)`,
+    String.raw`\s(?:--(?:kube-)?context[= ]|config\s+use-context\s+)(?:kind-[\w.-]+|k3d-[\w.-]+|minikube|docker-desktop|rancher-desktop|colima|orbstack)(?=\s|$)`,
     String.raw`\spush(?:\s+-\S+)*\s+${LOCAL_REGISTRY}\S*${LAST}`,
   ].join('|'),
   'i',
@@ -307,6 +325,15 @@ const GREP_VALUE = /^(?:-[A-Za-z]*[efmABCdD]|--(?:regexp|file|max-count|after-co
 const WALK_SKIP = new Set(['node_modules', '.git']);
 const TOO_LARGE = Symbol('too large');
 const WALK_CAP = 20000;
+const WILD = /[*?[]/;
+// ripgrep told to read what the ignore files or a leading dot would keep out, and its options that take a value.
+const RG_UNRESTRICTED = /^(?:-[A-Za-z]*u[A-Za-z]*|-\.|--unrestricted|--hidden|--no-ignore(?:-vcs)?)$/;
+const RG_VALUE = /^(?:-[A-Za-z]*[ABCEMTdjmr]|--(?:after-context|before-context|context|color|colors|context-separator|encoding|engine|field-context-separator|field-match-separator|ignore-file|max-columns|max-count|max-depth|max-filesize|path-separator|pre|pre-glob|replace|sort|sortr|threads|type-add|type-clear|type-not))$/;
+// PowerShell: the listings Select-String reads file by file, and -Recurse as it may be cut short (-s is its alias).
+const PS_LISTERS = new Set(['get-childitem', 'gci', 'dir', 'ls']);
+const PS_SEARCHERS = new Set(['select-string', 'sls']);
+const PS_RECURSE = /^-(?:r|re|rec|recu|recur|recurs|recurse|s)$/i;
+const FIND_RUNS = /^-(?:exec|execdir|ok|okdir)$/;
 const PATH_PARAM = /^-(?:Path|LiteralPath|LP|PSPath)$/i;
 const EXPRESSION = /^(?:-e|--regexp|--expression)$/;
 const EXCLUDE_FLAG = /^--exclude(?:-dir)?$/i;
@@ -319,6 +346,8 @@ const REMOVERS = new Set([
   'rm', 'del', 'erase', 'ri', 'rd', 'rmdir', 'remove-item', 'unlink', 'mv', 'move', 'move-item', 'mi', 'ren',
   'rename-item', 'rni', 'truncate', 'shred', 'clear-content', 'clc',
 ]);
+// A command that runs the one it is handed, with the options of its own that take a value.
+const RUNNERS = new Map(Object.entries({ sudo: 'ugphCDRTU', doas: 'uC', xargs: 'InPLdEsa', env: 'uCS', timeout: 'sk', time: 'of', nice: 'n', nohup: '', command: '', exec: 'a' }));
 // A command that runs another one handed to it as a quoted word: that word is judged as a command of its own.
 const LAUNCHERS = new Set([
   'bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'pwsh', 'powershell', 'eval', 'iex', 'invoke-expression', 'ssh',
@@ -342,7 +371,7 @@ let question = '';
 const QUESTION = {
   data: (label) => `backend-guard: this command ${KIND.data} (${label}). ${RULE}: a database is wiped only when you asked for exactly that - approve it if you did, and check which database it points at first.`,
   reveal: (label) => `backend-guard: this command prints secret values (${label}). ${RULE}: a secret is never read or printed - approve it only if you asked for exactly that.`,
-  large: (label) => `backend-guard: a recursive grep over ${label} - the tree is too large to check for secret files; name the folders or add --exclude. ${RULE}: approve it only if no env file or key sits under it.`,
+  large: (label) => `backend-guard: a search over ${label} - the tree is too large to check for secret files; name the folders or exclude what it must not read. ${RULE}: approve it only if no env file or key sits under it.`,
   remote: (label) => `backend-guard: this command reaches another machine (${label}). ${RULE}: nothing the agent runs leaves the machine unasked - approve it only if you asked for exactly this, and check which host it is first.`,
 };
 function ask(label, kind = 'data') {
@@ -396,7 +425,7 @@ function frozenAt(target, cwd) {
   const file = absolute(target, cwd);
   const dir = path.dirname(file);
   try {
-    const tracked = git(dir, ['ls-files', '-z', '--full-name', '--', normalized(file)]).split('\0').filter((name) => name && isFrozenPath(`/${name}`));
+    const tracked = git(dir, ['ls-files', '-z', '--full-name', '--', `${FOLD ? ':(icase)' : ''}${normalized(file)}`]).split('\0').filter((name) => name && isFrozenPath(`/${name}`));
     if (!tracked.length) return false;
     const ref = upstreamRef(dir);
     if (!ref) return true;
@@ -521,9 +550,16 @@ function segmentsOf(command, shell) {
     word = '';
     started = false;
   };
-  const endSegment = () => {
+  // What stood between two segments; a single `|` makes the second one read the first one's output (`piped`).
+  let joint = '';
+  const endSegment = (by = '') => {
     endWord();
-    if (words.length) segments.push(words);
+    if (words.length) {
+      words.piped = /^\)?\|$/.test(joint.replace(/\s/g, ''));
+      segments.push(words);
+      joint = '';
+    }
+    joint += by;
     words = [];
   };
   for (let index = 0; index < command.length; index += 1) {
@@ -548,7 +584,7 @@ function segmentsOf(command, shell) {
       }
     } else if (ch === '#' && !started) {
       while (index + 1 < command.length && command[index + 1] !== '\n') index += 1;
-    } else if (ch === '\n' || ';&|()'.includes(ch)) endSegment();
+    } else if (ch === '\n' || ';&|()'.includes(ch)) endSegment(ch);
     else if (/\s/.test(ch) || ch === '<' || ch === '>') endWord();
     else {
       word += ch;
@@ -559,34 +595,39 @@ function segmentsOf(command, shell) {
   return segments;
 }
 
-// A glob as grep's --include / --exclude reads it, against a base name; one brace group is expanded.
-function globTest(glob) {
+// A glob as grep's --include / --exclude reads it, against a base name; one brace group is expanded. PowerShell
+// and findstr match a name whatever its case ('i').
+function globTest(glob, flags = '') {
   const brace = /^(.*)\{([^{}]*)\}(.*)$/.exec(glob);
   const forms = brace ? brace[2].split(',').map((part) => brace[1] + part + brace[3]) : [glob];
-  const patterns = forms.map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`));
+  const patterns = forms.map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, flags));
   return (name) => patterns.some((pattern) => pattern.test(name));
 }
 
-// The first secret file a recursive grep reads under the folder, breadth first, past node_modules and .git; at the
-// entry cap, TOO_LARGE - whatever lies beyond it is unknown.
+// The first secret file a search reads under the folder, breadth first, past node_modules and .git; at the entry
+// cap, TOO_LARGE - whatever lies beyond it is unknown. The filters: `include` (a name must match one, when there is
+// any), `name` (and this one), `exclude`, `excludeDir`, and `depth`, the folder levels below the first it reads.
+const noFilters = () => ({ include: [], exclude: [], excludeDir: [], name: null, depth: Infinity });
 function secretUnder(folder, filters) {
-  const queue = [folder];
+  const queue = [[folder, 0]];
   let seen = 0;
   for (let at = 0; at < queue.length; at += 1) {
+    const [dir, level] = queue[at];
     let entries = [];
     try {
-      entries = readdirSync(queue[at], { withFileTypes: true });
+      entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const entry of entries) {
       if ((seen += 1) > WALK_CAP) return TOO_LARGE;
-      const full = path.join(queue[at], entry.name);
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!WALK_SKIP.has(entry.name) && !filters.excludeDir.some((test) => test(entry.name))) queue.push(full);
+        if (level < filters.depth && !WALK_SKIP.has(entry.name) && !filters.excludeDir.some((test) => test(entry.name))) queue.push([full, level + 1]);
       } else if (
         isSecret(full) &&
         (!filters.include.length || filters.include.some((test) => test(entry.name))) &&
+        (!filters.name || filters.name(entry.name)) &&
         !filters.exclude.some((test) => test(entry.name))
       ) {
         return full;
@@ -596,11 +637,34 @@ function secretUnder(folder, filters) {
   return '';
 }
 
-// `grep -r` does not read the ignore file: under a folder that holds an env file, at any depth, it prints the
-// file's lines - unless an --exclude, an --exclude-dir or an --include keeps that file out.
-function checkRecursiveGrep(words, names, reader, cwd) {
-  if (!GREPS.has(names[reader]) || !words.some((word) => RECURSIVE.test(word))) return;
-  const filters = { include: [], exclude: [], excludeDir: [] };
+// The word a segment runs: past its leading assignments and past a runner with its own options (`sudo -u app`,
+// `xargs -0`, `timeout 5`).
+function commandAt(words, names) {
+  let at = 0;
+  for (;;) {
+    while (at < words.length && /^[A-Za-z_]\w*=/.test(words[at])) at += 1;
+    const takes = RUNNERS.get(names[at]);
+    if (takes === undefined) return at;
+    const runner = names[at];
+    for (at += 1; at < words.length; at += 1) {
+      if (/^-[A-Za-z]$/.test(words[at]) && takes.includes(words[at][1])) at += 1;
+      else if (!words[at].startsWith('-') && !(runner === 'timeout' && /^\d/.test(words[at]))) break;
+    }
+  }
+}
+
+const walksOf = (folders, filters) => (folders.length ? folders : ['.']).map((folder) => ({ folder, filters }));
+// `app/*.py` is the folder app and the name *.py; null when the folder is a wildcard itself, which is not followed.
+function folderAndName(target) {
+  const flat = normalized(target);
+  const at = flat.lastIndexOf('/');
+  const folder = at === -1 ? '.' : flat.slice(0, at).replace(/^(?:[A-Za-z]:)?$/, '$&/');
+  return WILD.test(folder) ? null : { folder, name: flat.slice(at + 1), flat };
+}
+
+// `grep -r` does not read the ignore file - unless an --exclude, an --exclude-dir or an --include keeps a file out.
+function grepWalks(words, reader) {
+  const filters = noFilters();
   const plain = [];
   let patternGiven = false;
   for (let index = reader + 1; index < words.length; index += 1) {
@@ -615,19 +679,170 @@ function checkRecursiveGrep(words, names, reader, cwd) {
     } else if (/^(?:--regexp|--file)=/.test(word)) patternGiven = true;
     else if (!word.startsWith('-')) plain.push(word);
   }
-  const folders = patternGiven ? plain : plain.slice(1);
-  for (const folder of folders.length ? folders : ['.']) {
+  return walksOf(patternGiven ? plain : plain.slice(1), filters);
+}
+
+// ripgrep honours the ignore files and skips hidden files until -u, --no-ignore or --hidden says otherwise; then
+// it is judged as a search of every file. A -g glob narrows it, and so does a file type, read as its extension:
+// `-t json` still takes a secrets.json.
+function ripgrepWalks(words, reader) {
+  if (!words.some((word, index) => index > reader && RG_UNRESTRICTED.test(word))) return [];
+  const filters = noFilters();
+  const plain = [];
+  let patternGiven = false;
+  for (let index = reader + 1; index < words.length; index += 1) {
+    const joined = /^(--[\w-]+)=(.*)$/.exec(words[index]);
+    const flag = joined ? joined[1] : words[index];
+    const value = () => (joined ? joined[2] : (words[(index += 1)] ?? ''));
+    if (/^(?:-[A-Za-z]*g|--i?glob)$/.test(flag)) {
+      const glob = value();
+      const test = globTest(glob.replace(/^!/, '').replace(/\/(?:\*\*)?$/, ''));
+      for (const list of glob.startsWith('!') ? [filters.exclude, filters.excludeDir] : [filters.include]) list.push(test);
+    } else if (/^(?:-[A-Za-z]*t|--type)$/.test(flag)) {
+      const type = value();
+      filters.include.push(globTest(type === 'yaml' ? '*.{yaml,yml}' : `*.${type}`));
+    } else if (/^(?:-[A-Za-z]*[ef]|--regexp|--file)$/.test(flag)) {
+      value();
+      patternGiven = true;
+    } else if (RG_VALUE.test(flag)) value();
+    else if (!flag.startsWith('-')) plain.push(flag);
+  }
+  return walksOf(patternGiven ? plain : plain.slice(1), filters);
+}
+
+// findstr reads the files a wildcard names, and with /s the ones of that name in every folder below.
+function findstrWalks(words, reader) {
+  const plain = [];
+  let patternGiven = false;
+  let recursive = false;
+  for (const word of words.slice(reader + 1)) {
+    if (/^\/[belrsixvnmop]+$/i.test(word)) recursive ||= /s/i.test(word);
+    else if (/^\/[cg]:/i.test(word)) patternGiven = true;
+    else if (!/^\/[dfa]:/i.test(word)) plain.push(word);
+  }
+  return (patternGiven ? plain : plain.slice(1)).flatMap((target) => {
+    const at = folderAndName(target);
+    if (!at || !(recursive || WILD.test(at.name))) return [];
+    return [{ folder: at.folder, filters: { ...noFilters(), name: globTest(at.name, 'i'), depth: recursive ? Infinity : 0 } }];
+  });
+}
+
+// What a PowerShell listing hands on (`lister`) or what Select-String reads by itself: a wildcard names the
+// files of its folder; a listing without -Recurse stops at the folder's own files.
+function powershellWalks(words, from, lister) {
+  const filters = noFilters();
+  const targets = [];
+  let pattern = lister;
+  let depth = 0;
+  for (let index = from + 1; index < words.length; index += 1) {
+    const word = words[index];
+    // A parameter's value is one word, or a comma list that may run over several: `-Include *.py, *.toml`.
+    const list = () => {
+      const values = [];
+      do values.push(...(words[(index += 1)] ?? '').split(',').filter(Boolean));
+      while ((words[index] ?? '').endsWith(','));
+      return values;
+    };
+    if (PATH_PARAM.test(word)) targets.push(...list());
+    else if (/^-(?:Include|Filter)$/i.test(word)) filters.include.push(...list().map((glob) => globTest(glob, 'i')));
+    else if (/^-Exclude$/i.test(word)) filters.exclude.push(...list().map((glob) => globTest(glob, 'i')));
+    else if (/^-Pat(?!h)\w*$/i.test(word)) {
+      pattern = true;
+      index += 1;
+    } else if (/^-(?:Context|Encoding|Culture|Attributes)$/i.test(word)) index += 1;
+    else if (/^-Depth$/i.test(word)) depth = Number(words[(index += 1)]) || 0;
+    // Names, or folders only: nothing is read.
+    else if (lister && /^-(?:Name|Directory|ad)$/i.test(word)) return [];
+    else if (lister && PS_RECURSE.test(word)) depth = Infinity;
+    else if (word.startsWith('-')) continue;
+    else if (!pattern) pattern = true;
+    else targets.push(...word.split(',').filter(Boolean));
+  }
+  return (targets.length || !lister ? targets : ['.']).flatMap((target) => {
+    const at = folderAndName(target);
+    if (!at) return [];
+    if (WILD.test(at.name)) return [{ folder: at.folder, filters: { ...filters, name: globTest(at.name, 'i'), depth } }];
+    return lister ? [{ folder: at.flat, filters: { ...filters, depth } }] : [];
+  });
+}
+
+// What a `find` hands to the command it runs or pipes into: the folders it starts from, narrowed by its -name
+// tests and -maxdepth. Nothing where it lists folders only, or where a -path or -regex test picks the files -
+// the walk cannot follow those.
+function findWalks(words, at) {
+  const folders = [];
+  let index = at + 1;
+  while (/^-[HLP]$/.test(words[index] ?? '')) index += 1;
+  for (; index < words.length && !/^[-!(]/.test(words[index]); index += 1) folders.push(words[index]);
+  const filters = noFilters();
+  for (; index < words.length && !FIND_RUNS.test(words[index]); index += 1) {
+    const word = words[index];
+    const negated = /^(?:!|-not)$/.test(words[index - 1] ?? '');
+    const pruned = words[index + 2] === '-prune';
+    if (/^-i?name$/.test(word)) {
+      const test = globTest(words[(index += 1)] ?? '', word === '-iname' ? 'i' : '');
+      (pruned ? filters.excludeDir : negated ? filters.exclude : filters.include).push(test);
+    } else if (/^-(?:i?path|i?wholename|i?regex)$/.test(word)) {
+      if (!negated && !pruned) return [];
+      index += 1;
+    } else if (word === '-type' && words[index + 1] === 'd' && !words.includes('-prune')) return [];
+    else if (word === '-maxdepth') filters.depth = Number(words[(index += 1)]) - 1;
+  }
+  return filters.depth >= 0 ? walksOf(folders, filters) : [];
+}
+
+// A search that reads a whole folder reads the secret file in it, at any depth: `grep -r`, an unrestricted `rg`,
+// `findstr /s`, a wildcard handed to findstr or Select-String, a file listing piped into Select-String (`feed` is
+// the segment that pipes into this one), a `find` that hands its files to a reader. Each is walked the way the
+// command reads, and refused unless its own filters keep every secret file out.
+function checkSearch(words, names, reader, cwd, feed) {
+  const walks = [];
+  if (GREPS.has(names[reader]) && words.some((word) => RECURSIVE.test(word))) walks.push(...grepWalks(words, reader));
+  else if (names[reader] === 'rg') walks.push(...ripgrepWalks(words, reader));
+  else if (names[reader] === 'findstr') walks.push(...findstrWalks(words, reader));
+  else if (PS_SEARCHERS.has(names[reader])) walks.push(...powershellWalks(words, reader, false));
+  const at = commandAt(words, names);
+  const feedNames = (feed ?? []).map(commandName);
+  const feedAt = commandAt(feed ?? [], feedNames);
+  if (names[at] === 'find' && words.some((word, index) => FIND_RUNS.test(word) && READERS.has(names[index + 1]))) walks.push(...findWalks(words, at));
+  else if (feedNames[feedAt] === 'find' && READERS.has(names[at]) && names.slice(0, at).includes('xargs')) walks.push(...findWalks(feed, feedAt));
+  else if (PS_LISTERS.has(feedNames[feedAt]) && PS_SEARCHERS.has(names[reader])) walks.push(...powershellWalks(feed, feedAt, true));
+  for (const { folder, filters } of walks) {
     const secret = secretUnder(absolute(folder, cwd), filters);
     if (secret === TOO_LARGE) ask(folder, 'large');
     else if (secret) {
       deny(
-        `Blocked by .claude/hooks/backend-guard.mjs: a recursive grep over ${folder} walks into ${normalized(path.relative(cwd, secret))}, a secret file (SECRET_PATHS), and prints its lines. ${RULE}: search with the Grep tool or \`git grep\`, which skip ignored files, or name the folders to search.`,
+        `Blocked by .claude/hooks/backend-guard.mjs: this search reads every file it finds under ${folder}, and ${normalized(path.relative(cwd, secret))} there is a secret file (SECRET_PATHS). ${RULE}: search with the Grep tool or \`git grep\`, which skip ignored files, or name the folders or the file names to search.`,
       );
     }
   }
 }
 
-function checkSegment(words, shell, cwd, depth) {
+// What a segment deletes or moves: the words after a remover it runs itself - at its head, as `git rm` / `git mv`,
+// behind `find -exec` or `cmd /c` - and the folders a deleting `find` starts from. A remover word anywhere else is
+// a name: `docker rm -f db`, `npm rm db`.
+function removed(words, names) {
+  const at = commandAt(words, names);
+  const name = names[at] ?? '';
+  if (REMOVERS.has(name)) return words.slice(at + 1);
+  if (name === 'git') {
+    const verb = words.findIndex((word, index) => index > at && !word.startsWith('-') && !/^-[Cc]$/.test(words[index - 1]));
+    return /^(?:rm|mv)$/.test(words[verb] ?? '') ? words.slice(verb + 1) : [];
+  }
+  if (name === 'find') {
+    const run = words.findIndex((word, index) => FIND_RUNS.test(word) && REMOVERS.has(names[index + 1]));
+    if (run === -1 && !words.includes('-delete')) return [];
+    const starts = words.slice(at + 1, words.findIndex((word, index) => index > at && /^[-!(]/.test(word) && !/^-[HLP]$/.test(word)));
+    return [...starts, ...(run === -1 ? [] : words.slice(run + 2).filter((word) => !/^(?:\{\}|\+|;)$/.test(word)))];
+  }
+  if (/^(?:cmd|pwsh|powershell)$/.test(name)) {
+    const run = words.findIndex((word, index) => index > at && /^(?:\/[ck]|-c|-command)$/i.test(word));
+    return run !== -1 && REMOVERS.has(names[run + 1]) ? words.slice(run + 2) : [];
+  }
+  return [];
+}
+
+function checkSegment(words, shell, cwd, depth, feed) {
   const names = words.map(commandName);
   const headAt = names.findIndex((name, index) => !/^[A-Za-z_]\w*=/.test(words[index]) && !WRAPPERS.has(name));
   const head = names[headAt] ?? '';
@@ -688,9 +903,9 @@ function checkSegment(words, shell, cwd, depth) {
         patternSeen = true;
         return;
       }
-      for (const value of values) if (value && reaches(value)) secretRefusal(value, 'print or copy');
+      for (const value of values) if (value && !value.startsWith('!') && reaches(value)) secretRefusal(value, 'print or copy');
     });
-    checkRecursiveGrep(words, names, reader, cwd);
+    checkSearch(words, names, reader, cwd, feed);
   }
 
   // `git show HEAD:.env` and `git diff -- .env` print the file as surely as `cat` does; `git log` only with a patch.
@@ -701,8 +916,8 @@ function checkSegment(words, shell, cwd, depth) {
     });
   }
 
-  if (FROZEN_PATHS.length && (names.some((name) => REMOVERS.has(name)) || (names.includes('find') && words.includes('-delete')))) {
-    for (const word of words) {
+  if (FROZEN_PATHS.length) {
+    for (const word of removed(words, names)) {
       if (!word.startsWith('-') && frozenAt(word, cwd)) frozenRefusal(word, 'delete or move');
     }
   }
@@ -741,12 +956,15 @@ function checkCommand(command, shell, cwd, depth) {
   for (const [, , target] of unquoted.matchAll(/(?<![<\w$&])<(?![<(&=])\s*(["']?)([^\s"'<>|;&()]+)\1/g)) {
     if (isSecret(target)) secretRefusal(target, 'read');
   }
-  // What echo or printf pipes into a database client is its statement; into a shell, a command.
-  for (const [, body, reader] of outer.matchAll(/(?:^|[\n;&|(])\s*(?:echo|printf)\s([^|\n]*)\|([^|;&\n]*)/g)) {
+  // What echo or printf pipes into a database client is its statement; into a shell, a command. PowerShell pipes
+  // a bare quoted string the same way.
+  for (const [, echoed, quoted, reader] of outer.matchAll(/(?:^|[\n;&|(])\s*(?:(?:echo|printf)\s([^|\n]*)|("[^"\n]*"|'[^'\n]*')\s*)\|([^|;&\n]*)/g)) {
+    const body = echoed ?? quoted;
     checkStdinSql(reader, body);
     if (depth < MAX_DEPTH && SHELL_HEREDOC.test(reader)) checkCommand(body.trim().replace(/^(["'])(.*)\1$/s, '$2'), 'Bash', cwd, depth + 1);
   }
-  for (const words of segmentsOf(outer, shell)) checkSegment(words, shell, cwd, depth);
+  const segments = segmentsOf(outer, shell);
+  segments.forEach((words, index) => checkSegment(words, shell, cwd, depth, words.piped ? segments[index - 1] : undefined));
 }
 
 try {

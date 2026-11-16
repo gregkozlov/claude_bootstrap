@@ -87,13 +87,15 @@ const STDIN_VALUE_FLAG =
   /^(?:-r|--require|--import|--loader|--experimental-loader|--env-file|--env-file-if-exists|-C|--conditions|--input-type|--title|-X|-W)$/;
 const ONE_LINER_FLAG = /^(?:-[ecpm]|-pe|--eval|--print)$/;
 // A shell, `eval`, `source` or `.` runs a heredoc body as a script, so with one in the command no body is blanked.
-const SHELL_READER = /(?:^|[\s;&|(`])(?:(?:[^\s#'"]*\/)?(?:bash|sh|zsh|dash|ksh|eval|source)(?:\.exe)?(?=[\s;&|)<>]|$)|\.(?=\s))/;
+const SHELL_READER = /(?:^|[\s;&|(`])(?:(?:[^\s#'";&|(`]*\/)?(?:bash|sh|zsh|dash|ksh|eval|source)(?:\.exe)?(?=[\s;&|)<>]|$)|\.(?=\s))/;
 const INTERPRETER_ONE_LINER =
   /\b(?:node(?:\.exe)?(?:\s+-{1,2}\w[\w-]*(?:=\S+)?)*?\s+(?:-e|--eval|-p|--print|-pe)|python[\d.]*(?:\.exe)?(?:\s+-[A-Za-z]+(?:\s+[^-\s]\S*)?)*?\s+-c|py(?:\s+-\S+)*?\s+-c|(?:pwsh|powershell)(?:\.exe)?(?:\s+-\w+(?:\s+[^-\s"']\S*)?)*?\s+-c(?:ommand)?|iex|Invoke-Expression)\b/i;
 const SCRIPT_WRITE =
   /\b(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|rmSync|unlinkSync|truncateSync|mkdirSync|rmdirSync|openSync|open|os\.(?:remove|unlink|rmdir|mkdir|makedirs)|shutil\.rmtree|(?<=\.)rm|(?<=\.)write_(?:text|bytes))\s*\(/gi;
 const WRITE_MODE = /^\s*(?:mode\s*=\s*)?(['"])[rbt]*[wax+][rbtwax+]*\1\s*$/;
-const SCRIPT_COPY = /\b(copyFileSync|copyFile|cpSync|renameSync|rename|shutil\.(?:copy2?|copyfile|copytree|move))\s*\(/gi;
+// `rename` only as a file API - bare, or on `os.`, `fs.`, `Path(...).`, `require(...).`: `df.rename(columns=...)` renames no file.
+const SCRIPT_COPY =
+  /\b(copyFileSync|copyFile|cpSync|renameSync|(?:(?<![\w.$])|(?<=\b(?:os|fs|fsp|fsPromises|promises)\.)|(?<=\b(?:Path|require)\([^()]*\)\.))rename|shutil\.(?:copy2?|copyfile|copytree|move))\s*\(/gi;
 const DOTNET_WRITE = /\[(?:System\.)?IO\.(?:File|Directory)\]::(?:Write\w*|Append\w*|Delete|Create\w*)\s*\(/gi;
 const DOTNET_COPY = /\[(?:System\.)?IO\.(?:File|Directory)\]::(Copy|Move|Replace)\s*\(/gi;
 const SHELL_HEAD =
@@ -143,7 +145,10 @@ const DESTINATION_PARAMS = /^-(?:Destination|OutFile)$/i;
 const COPIER_DESTINATION = /^(?:-t|--target-directory)$/;
 const CURL_DESTINATION = /^(?:-[A-Za-z]*o|--output)$/;
 const WGET_DESTINATION = /^(?:-[A-Za-z]*O|--output-document)$/;
-const DOWNLOADER = /^(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm)$/i;
+// Their only write is the file an output flag names; `sort -o` is one of them.
+const DOWNLOADER = /^(?:curl|wget|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|sort)$/i;
+// The tools the gh and in-place checks name read their own quoted arguments: `gh api graphql -f query='mutation ...'`.
+const READS_OWN_QUOTES = /^(?:gh|g?sed|perl|g?awk)$/i;
 const IN_PLACE_EDIT =
   /\bg?sed\s+(?:-\S+\s+)*(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place)|\bperl\s+(?:-\S+\s+)*-[pnlaws]*i(?:\.\S*|[pnlaeEws]*)?(?=\s|$)|\bg?awk\b[^|]*-i\s*inplace|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+prettier\b[^|;&]*\s(?:--write|-w)\b|\b(?:npx|bunx|pnpm(?:\s+(?:exec|dlx))?|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)(?:\s+-{1,2}\w[\w-]*)*\s+eslint\b[^|;&]*\s--fix(?![\w-])|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint\b[^|;&]*\s--fix(?![\w-])|\bbiome\b[^|;&]*\s--(?:write|fix|apply)\b/i;
 // A redirect target: `> file`, `>> file`, `2> file` (`tee` is a mover). The lookbehind keeps `<>`, `||`, `>>` and
@@ -278,34 +283,45 @@ function backtickBodies(command) {
 }
 
 // Quoted spans become spaces of the same length: callers index the result with offsets into the original.
+// A blank the shell does not split at - escaped, or inside a kept span - becomes HELD_BLANK, so a path with a space
+// stays one word. No caller reads it back: the redirect check takes its target from the command at the same offsets.
+const HELD_BLANK = '\u0001';
 function unquoted(command, shell) {
   let out = '';
   let quote;
   let keep = false;
+  // Whether `out` ends in a redirect and blanks (`>`, `>|`, `>&`): 1 right behind the `>`, 2 further on. Kept per
+  // character - a regex at every quote would rescan the text, quadratic in a command with many of them.
+  let redirect = 0;
+  const add = (text) => {
+    out += text;
+    for (const ch of text) redirect = ch === '>' ? 1 : /\s/.test(ch) ? Math.min(redirect * 2, 2) : redirect === 1 && (ch === '|' || ch === '&') ? 2 : 0;
+  };
   for (let index = 0; index < command.length; index += 1) {
     const ch = command[index];
     if (escapedAt(quote, command, index, shell)) {
-      out += !quote || keep ? command.slice(index, index + 2) : '  ';
+      const pair = /[ \t]/.test(command[index + 1]) ? ch + HELD_BLANK : command.slice(index, index + 2);
+      add(!quote || keep ? pair : '  ');
       index += 1;
       continue;
     }
     if (quote) {
       if (ch === quote) {
         quote = undefined;
-        out += ' ';
+        add(' ');
       } else {
-        out += keep ? ch : ' ';
+        add(keep ? (/[ \t]/.test(ch) ? HELD_BLANK : ch) : ' ');
       }
       continue;
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
-      // A quoted span right after a redirect (`>`, `>|`, `>&`) IS the target and has to stay readable.
-      keep = />[|&]?\s*$/.test(out);
-      out += ' ';
+      // A quoted span right after a redirect IS the target and has to stay readable.
+      keep = redirect > 0;
+      add(' ');
       continue;
     }
-    out += ch;
+    add(ch);
   }
   return out;
 }
@@ -446,7 +462,8 @@ function normalizeGit(text) {
   return text
     .replace(/\\?["'`,[\]]/g, ' ')
     .replace(/\$\(|[(){}]/g, ' ')
-    .replace(/\S*[\\/]git(?:\.exe)?(?=\s|$)/gi, 'git')
+    // Anchored at a word start: unanchored, one long word costs quadratic time, and a hook killed at its timeout allows.
+    .replace(/(?<!\S)\S*[\\/]git(?:\.exe)?(?=\s|$)/gi, 'git')
     .replace(/\bgit\.exe\b/gi, 'git');
 }
 
@@ -539,11 +556,27 @@ function gitWrites(segment, shell) {
   const run = unwrapRunner(words);
   if (GIT_BINARY.test(run[0] ?? '')) return gitCallWrites(run, 0);
   const launched = (list) => list.some((word, index) => GIT_BINARY.test(word) && gitCallWrites(list, index));
-  // PowerShell hands `Start-Process git 'commit','-m','x'` its arguments as one comma or space list.
-  if (GIT_LAUNCHER.test(head)) return launched(words.slice(1)) || launched(words.slice(1).flatMap((word) => word.split(/[\s,]+/).filter(Boolean)));
+  // PowerShell hands `Start-Process git 'commit','-m','x'` its arguments as one comma or space list. Only there:
+  // split for every launcher, the pattern of `xargs grep -n "git commit"` would read as a git call.
+  if (GIT_LAUNCHER.test(head)) {
+    return launched(words.slice(1)) || (/^(?:Start-Process|saps|start)$/i.test(head) && launched(words.slice(1).flatMap((word) => word.split(/[\s,]+/).filter(Boolean))));
+  }
+  return runsCode(segment, words) && gitWritesAnywhere(segment);
+}
+
+function runsCode(segment, words) {
+  const head = words[0] ?? '';
   const code = SCRIPT_HEAD.test(toolName(head)) && (/^eval$/.test(head) || words.some((word) => /^(?:-[a-zA-Z]*[eEr]|--eval|eval|-c|-Command)$/i.test(word)));
-  if (INTERPRETER_ONE_LINER.test(segment) || code) return gitWritesAnywhere(segment);
-  return false;
+  return INTERPRETER_ONE_LINER.test(segment) || code;
+}
+
+// A quoted argument is data to the program that gets it (`echo "next: gh pr create"`, `npm test -- -t "sed -i"`), so the
+// gh and in-place checks read it only where it can run or is the tool's own: an interpreter's code, a launcher's
+// command unless that is a search, the tools in READS_OWN_QUOTES, and a bare assignment, whose value may run later.
+function quotedRuns(segment, words) {
+  if (words.length === 0) return true;
+  if (GIT_LAUNCHER.test(words[0])) return !words.some((word) => SEARCH_COMMAND.test(word));
+  return runsCode(segment, words) || READS_OWN_QUOTES.test(toolName(unwrapRunner(words)[0]));
 }
 
 function gitWritesAnywhere(text) {
@@ -568,7 +601,7 @@ function firstGitVerb(segment, shell) {
 
 const toolName = (word) => (word ?? '').replace(/^.*[\\/]/, '').replace(/\.(?:exe|cmd)$/i, '');
 
-// The tool a runner starts: `npx x`, `pnpm exec x`, `yarn dlx x`, `npm exec -- x`, `python -m x`, `uv run x`, `uvx x`.
+// The tool a runner starts: `npx x`, `pnpm exec x`, `yarn dlx x`, `npm exec -- x`, `bun x x`, `python -m x`, `uv run x`, `uvx x`.
 function unwrapRunner(words) {
   let rest = words;
   for (let round = 0; round < 3; round += 1) {
@@ -576,7 +609,7 @@ function unwrapRunner(words) {
     const second = rest[1] ?? '';
     let skip = 0;
     if (/^(?:npx|bunx|uvx)$/i.test(name)) skip = 1;
-    else if ((/^(?:pnpm|yarn)$/i.test(name) && /^(?:exec|dlx)$/.test(second)) || (/^npm$/i.test(name) && second === 'exec')) skip = 2;
+    else if ((/^(?:pnpm|yarn)$/i.test(name) && /^(?:exec|dlx)$/.test(second)) || (/^npm$/i.test(name) && second === 'exec') || (/^bun$/i.test(name) && second === 'x')) skip = 2;
     else if (/^(?:uv|poetry|pdm|hatch|rye|pipenv|pipx)$/i.test(name) && second === 'run') skip = 2;
     else if (/^(?:python[\d.]*|py)$/i.test(name)) {
       const module = rest.findIndex((word, index) => index > 0 && (word === '-m' || !word.startsWith('-')));
@@ -611,11 +644,14 @@ function releaseWrites(words) {
   return !args.some((arg) => /^(?:--dry-run|-d|--help|-h|--version|-v|-V)$/.test(arg));
 }
 
-// Another ecosystem's formatter rewrites its operands unless a check flag keeps it read-only. A project's own task
-// (`./gradlew spotlessApply`, `npm run format`) is its own script and passes.
+// A formatter or fixer rewrites its operands unless a check flag keeps it read-only, and a few everyday tools edit a
+// file in place on one flag. A project's own task (`./gradlew spotlessApply`, `make fmt`, `npm run format`) is its own
+// script and passes. A formatter this project runs that is not here: add a case, and one in the shell suite.
 function formatterWrites(words) {
   let [tool, ...args] = unwrapRunner(words);
-  let name = toolName(tool);
+  // `yarn prettier`, `pnpm eslint` and `bun stylelint` start the package's binary with no `exec`.
+  if (/^(?:yarn|pnpm|bun)$/i.test(toolName(tool)) && /^(?:prettier|eslint|stylelint)(?:@|$)/.test(args[0] ?? '')) [tool, ...args] = args;
+  let name = toolName(tool).replace(/(?<=.)@.*$/, '');
   if (/^java$/i.test(name) && /google-java-format/.test(args[args.indexOf('-jar') + 1] ?? '')) {
     name = 'google-java-format';
     args = args.slice(args.indexOf('-jar') + 2);
@@ -623,19 +659,35 @@ function formatterWrites(words) {
   const has = (pattern) => args.some((arg) => pattern.test(arg));
   const subcommand = args.find((arg) => !arg.startsWith('-') && !arg.startsWith('+'));
   const help = /^(?:--help|-h|--version|-V)$/;
+  // `dotnet csharpier .` and `csharpier format .` write; `--check` and the `check` command only read.
+  const csharpierWrites = (rest) => !rest.some((arg) => /^(?:check|--check|--write-stdout|--help|-h|--version)$/.test(arg));
   switch (name) {
+    case 'prettier':
+      return has(/^(?:--write|-w)$/);
+    case 'eslint':
+    case 'stylelint':
+      return has(/^--fix(?:=\S*)?$/);
     case 'black':
       return !has(/^(?:--check|--diff|--code|-c)$/) && !has(help) && !args.includes('-');
+    case 'isort':
+      return !has(/^(?:--check-only|--check|-c|--diff|-d|--show-files|--show-config)$/) && !has(help) && !args.includes('-');
     case 'ruff':
       return (subcommand === 'format' && !has(/^(?:--check|--diff)$/) && !has(help)) || (has(/^--fix(?:-only)?$/) && !has(/^--diff$/));
     case 'gofmt':
+    case 'goimports':
       return has(/^--?w(?:=true)?$/);
     case 'go':
       return subcommand === 'fmt' && !has(/^-n$/);
+    case 'golangci-lint':
+      return has(/^--fix(?:=true)?$/) || (subcommand === 'fmt' && !has(/^(?:-d|--diff|--diff-colored|--stdin)$/) && !has(help));
     case 'dotnet':
+      if (subcommand === 'csharpier') return csharpierWrites(args.slice(args.indexOf('csharpier') + 1));
       return subcommand === 'format' && !has(/^(?:--verify-no-changes|--check|--help|-h|-\?)$/);
     case 'dotnet-format':
       return !has(/^(?:--verify-no-changes|--check|--dry-run|--help|-h)$/);
+    case 'csharpier':
+    case 'dotnet-csharpier':
+      return csharpierWrites(args);
     case 'cargo':
       return subcommand === 'fmt' && !has(/^--check$/) && !has(help);
     case 'rustfmt': {
@@ -650,6 +702,14 @@ function formatterWrites(words) {
       return has(/^--?i$/);
     case 'rubocop':
       return has(/^(?:-a|-A|-x|--auto-?correct(?:-all)?|--fix-layout)$/);
+    case 'yq':
+      return has(/^(?:-[a-zA-Z]*i|--inplace|--in-place)$/);
+    case 'ruby':
+      // Only ruby's own flags, before the script: `-i` in a cluster, never `-I <dir>` or the glued value of `-r`.
+      for (let index = 0; index < args.length && args[index].startsWith('-'); index += /^-(?![rI].)[a-zA-Z]*[eIrCEF]$/.test(args[index]) ? 2 : 1) {
+        if (/^-[pnlaws]*i(?:\.\S*|[pnlaeEws]*)$/.test(args[index])) return true;
+      }
+      return false;
     default:
       return false;
   }
@@ -762,7 +822,7 @@ function moverArguments(tokens, context) {
       } else if (
         (powershell && DESTINATION_PARAMS.test(name)) ||
         (COPIER.test(verb) && COPIER_DESTINATION.test(name)) ||
-        (/^curl$/i.test(verb) && CURL_DESTINATION.test(name)) ||
+        (/^(?:curl|sort)$/i.test(verb) && CURL_DESTINATION.test(name)) ||
         (/^wget$/i.test(verb) && WGET_DESTINATION.test(name))
       ) {
         const item = value();
@@ -828,7 +888,8 @@ function checkMovers(segment, context) {
     .filter((target) => target && !isScratchTarget(target) && !NODE_MODULES.test(normalizedPath(target)));
   if (DELETER.test(verb)) {
     for (const target of inTree) context.deleted.add(normalizedPath(target).toLowerCase());
-    if (context.deleted.size > 1 || inTree.some((target) => /[*?[]/.test(target))) {
+    // A bracketed name that exists as written (`app/[slug]/page.tsx`) is that one file, not a glob.
+    if (context.deleted.size > 1 || inTree.some((target) => /[*?]/.test(target) || (target.includes('[') && !existsAsWritten(target, context.cwd)))) {
       deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" removes more than one project path in one call. CLAUDE.md, Shell and file edits: an orphaned file is deleted one path at a time.`);
     }
   }
@@ -857,7 +918,7 @@ function checkMovers(segment, context) {
 }
 
 function checkFind(command, shell) {
-  for (const match of unquoted(command, shell).matchAll(/(?:^|[\s;&|(])(?:\S*[\\/])?find(\s[^|;&\n]*)/g)) {
+  for (const match of unquoted(command, shell).matchAll(/(?:^|[\s;&|(])(?:[^\s;&|(]*[\\/])?find(\s[^|;&\n]*)/g)) {
     const start = match.index + match[0].length - match[1].length;
     const rest = command.slice(start, start + match[1].length);
     if (!/\s-delete\b|\s-exec(?:dir)?\s+["']?(?:rm|del|Remove-Item|unlink|shred)\b/i.test(` ${rest}`)) continue;
@@ -1025,7 +1086,10 @@ function checkCommand(command, context, depth = 0) {
     const args = callArguments(command, match.index + match[0].length, escape).map(literalPath);
     judgeWrite(match[1].toLowerCase() === 'copy' ? [args[1]] : [args[1], args[0]], `a .NET ${match[1]}`);
   }
-  if (readsScriptFromStdin(command, context.shell)) {
+  const stdinScript = readsScriptFromStdin(command, context.shell);
+  // Text a later program runs, so no quoted argument in the command is data: a script fed on stdin, a string piped into iex.
+  const fed = stdinScript || /\|\s*(?:iex|Invoke-Expression)\b/i.test(command);
+  if (stdinScript) {
     for (const match of command.matchAll(SCRIPT_WRITE)) {
       const args = callArguments(command, match.index + match[0].length, '\\');
       if (/^open/i.test(match[1]) && !args.slice(1).some((arg) => WRITE_MODE.test(arg))) continue;
@@ -1043,8 +1107,9 @@ function checkCommand(command, context, depth = 0) {
     const search = !substitution && SEARCH_COMMAND.test(head);
     // A one-liner keeps all its code in quotes, so a read before a write must not turn the whole segment into text.
     const readGit = !substitution && !INTERPRETER_ONE_LINER.test(segment) && GIT_READ_VERBS.has(firstGitVerb(segment, context.shell) ?? '');
-    // A search's pattern and a read git verb's quoted argument are text, not commands.
-    const text = search || readGit ? unquoted(segment, context.shell) : segment;
+    const words = commandWords(segment, context.shell);
+    // A search's pattern, a read git verb's quoted argument and a quoted argument nothing runs are text, not commands.
+    const text = search || readGit || !(substitution || fed || quotedRuns(segment, words)) ? unquoted(segment, context.shell) : segment;
     if (!search) {
       if (gitWrites(segment, context.shell)) deny(GIT_REFUSAL);
       if (ghWrites(text)) {
@@ -1053,14 +1118,13 @@ function checkCommand(command, context, depth = 0) {
       if (gitReadEscapes(segment, context.shell)) {
         deny('Blocked by .claude/hooks/guard.mjs: git grep -O / --open-files-in-pager starts a program and --output writes a file. Read git without them; a file is changed with Edit or Write.');
       }
-      const words = commandWords(segment, context.shell);
       if (releaseWrites(words)) {
         deny('Blocked by .claude/hooks/guard.mjs: this tool commits, tags or pushes through git (npm / pnpm / yarn version, release-it, standard-version, semantic-release, lerna version / publish, changeset publish). CLAUDE.md: apply file changes only - the author commits; `npm version <v> --no-git-tag-version` only bumps the files.');
       }
       // No scratch exemption: an in-place edit's target cannot be told from the rest of the command, so a `/tmp/`
       // anywhere in the line would wave through a `sed -i` on a source.
       if (IN_PLACE_EDIT.test(normalizeGit(text)) || formatterWrites(words)) {
-        deny('Blocked by .claude/hooks/guard.mjs: an in-place edit from the shell (sed -i, perl -i, awk -i inplace, prettier --write, eslint --fix, black, ruff format / --fix, gofmt -w, go fmt, dotnet format, cargo fmt, rustfmt, ktlint -F, google-java-format -i, clang-format -i, rubocop -a). CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write; a check flag (--check, --diff, --verify-no-changes) only reads.');
+        deny('Blocked by .claude/hooks/guard.mjs: an in-place edit from the shell (sed -i, perl -i, ruby -i, awk -i inplace, yq -i, prettier --write, eslint --fix, stylelint --fix, black, isort, ruff format / --fix, gofmt -w, goimports -w, go fmt, golangci-lint --fix, dotnet format, csharpier, cargo fmt, rustfmt, ktlint -F, google-java-format -i, clang-format -i, rubocop -a). CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write; a check flag (--check, --diff, --verify-no-changes) only reads.');
       }
       for (const target of sedWriteTargets(words)) {
         if (target === SED_EXEC) {
@@ -1085,7 +1149,10 @@ function checkCommand(command, context, depth = 0) {
     if (!search) checkMovers(segment, context);
   }
   for (const match of unquoted(code, context.shell).matchAll(WRITE_TARGET)) {
-    const target = match[1];
+    // Read from the command at the match's offsets, where a held blank is still the blank it was (`> "<root>/a b.log"`).
+    const start = match.index + match[0].length - match[1].length;
+    const written = code.slice(start, start + match[1].length);
+    const target = escape ? written.split(`${escape} `).join(' ') : written;
     if (!isScratchTarget(target)) {
       deny(`Blocked by .claude/hooks/guard.mjs: a shell write to "${target}". CLAUDE.md, Shell and file edits: repo files are changed with Edit or Write; scratch output goes under the session scratchpad or /tmp. Only $S, $TMP, $TEMP, $SCRATCH, $TMPDIR, $M, $env:TEMP, %TEMP% and a name set from mktemp resolve as scratch.`);
     }
@@ -1126,6 +1193,15 @@ function insideProject(filePath, cwd) {
 function isDirectory(target, cwd) {
   try {
     return statSync(path.resolve(cwd || process.cwd(), nativePath(target))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function existsAsWritten(target, cwd) {
+  try {
+    statSync(path.resolve(cwd || process.cwd(), nativePath(target)));
+    return true;
   } catch {
     return false;
   }

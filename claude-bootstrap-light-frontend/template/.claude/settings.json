@@ -102,7 +102,6 @@
     ],
     "allow": [
       "Bash(<CHECK_COMMAND>)",
-      "Bash(<CHECK_COMMAND>:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
@@ -121,7 +120,6 @@
       "Bash(node .claude/hooks/tests/upkeep-nudge-test.mjs)",
       "Bash(node .claude/skills/maintain-ai-layer/layer-refs.mjs:*)",
       "PowerShell(<CHECK_COMMAND>)",
-      "PowerShell(<CHECK_COMMAND>:*)",
       "PowerShell(git status:*)",
       "PowerShell(git diff:*)",
       "PowerShell(git log:*)",

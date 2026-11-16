@@ -51,9 +51,9 @@ Apply file changes only; leave them in the working tree for review.
 
 Git cannot revert a dropped table or a leaked key. The `backend-guard` hook refuses or asks about the forms it can read in a call (`.claude/hooks/README.md`); these rules hold where it sees nothing.
 
-- **Local only.** You edit code anywhere; what you **run** - the service, a migration, a seed, a script, a request that writes - may reach only what lives on this machine and can be rebuilt: localhost, a container (the throwaway ones a test starts, Testcontainers included), a test database, an emulator. Anything shared, staging or production is the owner's: name the command and stop. **Where a command points sits in an env file you cannot open**: before the first one that touches a store or an outside service, take the target from "Configuration and environments" below, and when that does not say, ask.
+- **Local only.** You edit code anywhere; what you **run** - the service, a migration, a seed, a script, a request that writes - may reach only what lives on this machine and can be rebuilt: localhost, a container (the throwaway ones a test starts, Testcontainers included), a test database, an emulator. Anything shared, staging or production is the owner's: name the command and stop. **Where a command points sits in an env file or local profile you may not be able to open**: before the first one that touches a store or an outside service, take the target from "Configuration and environments" below, and when that does not say, ask.
 - **A migration on the default branch is frozen**: another environment has applied it. A schema or data change is a new migration, created the project's way - never an edit, rename or delete of a frozen one. Never wipe a database (a reset, a drop, a downgrade past the task's own migration), a local one included, unless the user asked for exactly that - the hook then has them confirm the command.
-- **A secret is never read, printed, logged or written.** No env file, key or credentials file in a Read, a `cat` or a search: search with the Grep tool or `git grep`, never `grep -r` over a folder that holds one. A variable's name comes from the example file and the code that reads it; a new one goes into the example file with a placeholder, and the reply tells the owner to set it.
+- **A secret is never read, printed, logged or written.** No env file, key or credentials file in a Read, a `cat` or a search: search with the Grep tool or `git grep`, never `grep -r` over a folder that holds one. A variable's name comes from the example file, or the checked-in config that names the keys (`application.yml`, `appsettings.json`), and the code that reads it; a new one goes into that file with a placeholder, and the reply tells the owner to set it.
 - **Nothing leaves the machine.** No deploy, publish, image push or infrastructure change; no shell or copy to another host; no email, webhook, queue message, payment or third-party call that reaches a real recipient - use the project's fake or sandbox, and with none, leave that path unrun and name it as unverified.
 
 ---
@@ -103,7 +103,7 @@ Skills are loaded when their moment comes, never recalled from memory: `debug`, 
 
 ### Configuration and environments
 
-[fill] Where configuration is read and the example file that lists the variables; **where the local env file points, in the owner's words** (which database, which services) and what may be run against it; the fakes that stand in for outside services.
+[fill] Where configuration is read and the example file or checked-in config that lists the keys; **where the local env file or profile points, in the owner's words** (which database, which services) and what may be run against it; the fakes that stand in for outside services.
 
 ### Generated code
 
@@ -111,7 +111,7 @@ Skills are loaded when their moment comes, never recalled from memory: `debug`, 
 
 ## Code Style
 
-[fill] Only the rules a linter does not already enforce, the linter settings that surprise (a warning that fails the build, a ban with no visible reason in the code), and the formatter: its command, and whether the agent runs it on the files it changed or a commit hook does.
+[fill] Only the rules a linter does not already enforce, the linter settings that surprise (a warning that fails the build, a ban with no visible reason in the code), and the formatter: its command and who runs it - a commit hook, or the agent through the project's own task (`make fmt`, `./gradlew spotlessApply`). `guard` refuses the bare binary writing in place (`gofmt -w`, `dotnet format`, `black`): with no task, format with Edit and name the command for the owner.
 
 ### Comments - the default is none
 

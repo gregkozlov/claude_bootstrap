@@ -77,23 +77,23 @@ Apply file changes only; leave them in the working tree for review.
 
 ## Development Workflow
 
-Every **non-trivial** task (feature, bug fix, refactor) runs one lifecycle of nine steps. Steps 1-2 run before and inside plan mode and are here; **steps 3-9, the session folder and the re-entry rules are in the `lifecycle` skill: load it once step 2 closes (after plan approval), before the first edit.** **The review ladder lives in the `crosscheck` skill alone** - lifecycle step 3 loads it; never re-derive a tier from memory.
+Every **non-trivial** task (feature, bug fix, refactor) runs one lifecycle of nine steps. Steps 1-2 run before and inside plan mode and are here; **steps 3-9, the session folder and the re-entry rules are in the `lifecycle` skill: load it once step 2 closes (after plan approval), before the first edit.**
 
 1. **Investigate** - inline, or `Explore` for a broad or unfamiliar area. Say the class so the user can overrule it: a **spike** (a question, an experiment, throwaway code) is answered inline; a **bounded** change (known files, one surface, a shared component that keeps its contract) runs the lifecycle; an **architectural** one (a new or changed contract other consumers rely on, or several surfaces) goes through **plan mode**; a **bug report** goes through `debug` first. The ratchet is one-way: a bounded task that turns out to change a contract re-enters as architectural, and a higher class in an agent's report stands until the user downgrades it.
    **The Brief.** [fill] Name the tracker's MCP that fetches a ticket id (issue and comments) before anything else is read, or delete this sentence. The task verbatim, what the screenshots show, the decisions taken, the ticket facts and the assumptions go into a **Brief** at the top of the plan and the task file - subagents never see the images.
-   **Questions.** At most four per `AskUserQuestion`, each with at most four options; a fifth question, or one with more than four possible answers, goes into the reply as one numbered list instead. Every question carries a recommendation researched in the code, the docs or the installed source: in the dialog first and labelled "(Recommended)", in the list as `default: <answer>` - the one you take if the user does not answer.
+   **Questions.** More than the `AskUserQuestion` dialog holds goes into the reply as one numbered list. Every question carries a recommendation researched in the code, the docs or the installed source: first and "(Recommended)" in the dialog, `default: <answer>` in the list - the one taken if the user does not answer.
    **Context is scarce:** grep before Read; never Read a generated file, a schema, a fixture or a translation file whole - grep and Read with an offset; a question that needs more than a handful of files goes to `Explore`.
 2. **Before the first edit.** (a) Something with more than one consumer (a parser, a schema, a helper, a shared component, a CSS rule): grep its consumers and list them with the invariants the change must keep (round-trip, key uniqueness, every call site of a changed signature) - in the plan when there is one, since a plan accepted with cleared context loses the reply. (b) A **contract change** gets `hunt` on its plan before the user approves it, briefed as `crosscheck` says.
 
 **The session's record** is `.claude/sessions/<yyyy-mm-ddThh-mm>-<first 8 of the session id>/`: **open it as step 1 closes** by writing the Brief into `task-<slug>.md` (in plan mode, right after approval); the rest is in `lifecycle`. Never read another session's folder unless the user names it.
 
-`/maintain-ai-layer`, and any project skill that owns a recurring job, loads from a prose request too - never do one of those jobs without its skill.
+`/maintain-ai-layer`, and any project skill that owns a recurring job, loads from a prose request too - never do one of those jobs without its skill. `/retro` runs only from its slash command - asked in prose, name it and stop.
 
 **Skip steps 2, 4, 5 and 7** for a super-trivial edit (single-file, obvious, low-risk); "no subagents" skips every subagent launch.
 - [fill] Never for the change classes that cost this project a bug while looking trivial (a displayed rate or its formatter, a date boundary), in step with the "never tier 0" list in `crosscheck` - or delete this line.
 - "Single file, so trivial" does not qualify: a single file with a consumer is a shared surface - grep first.
 - The skipped steps' obligations stay with the main thread: the delegated artefacts and the comments by the rules in `.claude/agents/comments.md` and the project's editor agents; the twin sites and the docs the diff touches.
-- `lifecycle` still loads before the first edit; step 9 is never skipped, nor step 6 for a change the browser can show. A step's skill is loaded, not recalled.
+- Step 9 is never skipped, nor step 6 for a change the browser can show. A step's skill is loaded, not recalled.
 - **Name every skill and agent the task ran; a skipped or failed check - a subagent unavailable, a call denied - is said plainly.** A review that did not happen must never read like one that passed.
 
 ## Architecture

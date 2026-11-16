@@ -2,9 +2,11 @@
 // comparators - so an invariant (round-trip, boundary value) is run rather than reasoned about.
 //   node .claude/scripts/run-pure.mjs <path-to-probe.mjs>
 // Works for TypeScript modules without JSX, DOM or import.meta.env at module scope (Node 22.18+ / 23.6+ strip
-// types with no flag; 22.6-22.17 need `node --experimental-strip-types`). `window` is shimmed to an empty
-// object for modules that read it at import time. Not a test runner - a probe lives in the session scratchpad
-// and is deleted with it.
+// types with no flag; 22.6-22.17 need `node --experimental-strip-types`). Type stripping does not handle `enum`,
+// a `namespace` with runtime code or parameter properties: before Node 26 a module with one needs
+// `node --experimental-transform-types`; Node 26 dropped that flag, and there such a module does not load.
+// Imports resolve through the aliases in run-pure-hooks.mjs. `window` is shimmed to an empty object for modules
+// that read it at import time. Not a test runner - a probe lives in the session scratchpad and is deleted with it.
 import module from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { resolve } from './run-pure-hooks.mjs';

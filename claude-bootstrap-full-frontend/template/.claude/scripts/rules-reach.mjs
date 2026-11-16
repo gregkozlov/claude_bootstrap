@@ -52,9 +52,10 @@ const loadRules = () =>
         return rule;
       }
       for (const line of lines.slice(at + 1)) {
-        if (/^[^\s#]/.test(line)) break;
-        const glob = line.match(/^\s+-\s'([^']+)'$/)?.[1];
-        if (glob === undefined) rule.problems.push(`${file}: a \`paths:\` line that is not a single-quoted item: "${line}"`);
+        // The next frontmatter key ends the list; an item may sit at column 0 and take either quote.
+        if (/^[^\s#-]/.test(line)) break;
+        const glob = line.match(/^\s*-\s(['"])([^'"]+)\1$/)?.[2];
+        if (glob === undefined) rule.problems.push(`${file}: a \`paths:\` line that is not a quoted item: "${line}"`);
         else rule.globs.push(glob);
       }
       if (rule.globs.length === 0) rule.problems.push(`${file}: empty \`paths:\` list`);

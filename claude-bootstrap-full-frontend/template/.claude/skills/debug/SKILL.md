@@ -20,7 +20,7 @@ Run the `verify-live` skill on the surface with the user's inputs and data. The 
 - Reproduced: keep the exact steps, they are the proof in phase 4.
 - **Intermittent** (it shows on some loads, not on others): repeat the trigger under the same conditions before any diagnosis and write the rate into the task file (`3 of 10 loads`); only then change one variable per run. The phase-4 re-run (lifecycle step 6) repeats the same number of tries - one clean try of a bug seen in three of ten proves nothing.
 - Not reproducible on the data you can reach (a tenant, a permission, a day with no data): say so, name what would be needed, and offer instrumentation or a targeted question instead of a fix. **No fix ships for a bug nobody has seen.**
-- **`Browser check: off`** (`CLAUDE.md`): the user's own screenshot, console or network paste is the observation; the fix is proved by the phase-2 pure-part run before and after, and the user confirms the result once.
+- **`Browser check: off`** (`CLAUDE.md`): the user's own screenshot, console or network paste is the observation. Where the cause sits in a pure part the phase-2 run before and after proves the fix; where it does not, or the probe cannot import the module, the fix is named unverified in lifecycle step 8 and the user confirms it once.
 - **No server listening for this tree**: phase 0 and the static half of phase 2 still run, then the turn ends asking the owner to start one - no named cause, no fix.
 - Not visible in a browser at all (a build, a script, a type): the reproduction is the command and its output.
 
@@ -30,7 +30,7 @@ Follow the value from the wire to the pixel and find the **first** boundary wher
 
 1. **Request** - `read_network_requests` (or the equivalent log): the params that left (the right ids, the right period, the right enum vocabulary, nothing missing that the UI set).
 2. **Response** - the body as returned: the field, its scale (0-1 or percent), `null` where a number was expected, an array shorter than the count above it.
-3. **Derivation** - the hook, the store selector, the formatter, the comparator: run the pure part with `node .claude/scripts/run-pure.mjs <probe.mjs>` on the observed input rather than reasoning about it - when the cause sits there, that probe on that input is the proof re-run after the fix (phase 4); read the installed library implementation where its behaviour decides the outcome, never the prop name.
+3. **Derivation** - the hook, the store selector, the formatter, the comparator: run the pure part with `node .claude/scripts/run-pure.mjs <probe.mjs>` on the observed input rather than reasoning about it (a module it cannot import - an alias outside `ALIASES` in `.claude/scripts/run-pure-hooks.mjs`, TypeScript below Node 22.18 - is traced, and said so) - when the cause sits there, that probe on that input is the proof re-run after the fix (phase 4); read the installed library implementation where its behaviour decides the outcome, never the prop name.
 4. **Render** - the console with a pattern, the accessibility snapshot of the element, the state branch actually taken (loading, empty, error, data).
 
 Two facts are written for each boundary: expected and observed. The divergence sits at exactly one of them; everything downstream is a consequence, not a cause.
@@ -52,7 +52,7 @@ If two hypotheses survive, do not fix both: design the one observation that sepa
 
 The smallest change at the cause, not at the symptom. Add the named cause to the task file, say the class, then run the lifecycle from step 2 (`CLAUDE.md`; steps 3-9 in the `lifecycle` skill). This skill adds:
 
-- **The proof is the reproduction, before and after.** The `run-pure.mjs` probe on the observed input (phase 2, Derivation) or the reproduction of phase 1 shows the wrong value before the fix and the right one after it; both outputs go into the task file. A probe that does not show the wrong value before the fix means the cause is named wrong - back to phase 3, no fix.
+- **The proof is the reproduction, before and after.** The `run-pure.mjs` probe on the observed input (phase 2, Derivation) or the reproduction of phase 1 shows the wrong value before the fix and the right one after it; both outputs go into the task file. A probe that ran and does not show the wrong value before the fix means the cause is named wrong - back to phase 3, no fix; with no probe that ran and no reproduction, the fix is unverified (phase 1).
 - **The reproduction from phase 1 is re-run as part of lifecycle step 6 (after the first review round returns)** and its outcome stated with the observed value, not "works now".
 - **A second fix that does not close the reproduction stops the work.** Two failed fixes mean the cause is not what was named; report both attempts and the pattern they share, and the third attempt is the user's call - it is usually a wrong model of the code, not a wrong line.
 

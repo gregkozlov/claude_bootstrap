@@ -3,7 +3,9 @@
 //   node .claude/hooks/tests/guard-shell-test.mjs
 // Every line must read "ok".
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -16,6 +18,15 @@ const rootPath = root.split(BS).join('/');
 const parentPath = dirname(root).split(BS).join('/');
 const drive = /^([A-Za-z]):/.exec(rootPath)?.[1]?.toLowerCase();
 const firstDir = rootPath.replace(/^[A-Za-z]:/, '').split('/').find(Boolean);
+const hasParent = dirname(root) !== root;
+// A path that climbs back into the project through a folder with a space in its name: cut at the space it reads
+// as a sibling of the project, so these cases bite whether or not the root itself holds a space.
+const viaSpace = `${parentPath}/a b/../${basename(root)}`;
+// A temp tree with two bracketed names, the cwd of the cases that delete them: relative paths, so project paths.
+const brackets = mkdtempSync(join(tmpdir(), 'guard-shell-test-'));
+mkdirSync(join(brackets, 'blog', '[slug]'), { recursive: true });
+writeFileSync(join(brackets, 'blog', '[slug]', 'page.tsx'), '');
+writeFileSync(join(brackets, '[id].tsx'), '');
 
 const cases = [
   // git and gh
@@ -37,7 +48,7 @@ const cases = [
   ['git merge-file (deny)', 2, 'git merge-file a b c'],
   ['git mergetool (deny)', 2, 'git mergetool'],
   ['git worktree list (allow)', 0, 'git worktree list'],
-  ['git worktree remove (deny)', 2, 'git worktree remove ../wt1'],
+  ['git worktree remove (deny)', 2, 'git worktree remove ../other-tree'],
   ['git branch listing (allow)', 0, 'git branch --show-current'],
   ['git branch -D (deny)', 2, 'git branch -D feature'],
   ['git push after && (deny)', 2, 'npm run check && git push'],
@@ -310,14 +321,83 @@ const cases = [
   ['pathlib write_text from a stdin heredoc (deny)', 2, "python3 - <<'EOF'\nfrom pathlib import Path\nPath('<SRC_DIR>/a.ts').write_text('x')\nEOF"],
   // pathological input finishes inside the hook timeout, so the write in it is still refused
   ['unclosed $(( repeated, then a write (deny)', 2, `echo ${'$((1+(2*3)) '.repeat(3000)}> <SRC_DIR>/a.ts`],
+  ['one long word, then git commit (deny)', 2, `echo ${'QUJDREVG'.repeat(20000)}; git commit -m x`],
+  ['one long path word, then gh pr create (deny)', 2, `echo ${'a/'.repeat(80000)}; gh pr create`],
+  ['a long run of separators, then git push (deny)', 2, `echo ${'a;'.repeat(80000)} git push`],
+  ['many quoted words, then a write (deny)', 2, `echo ${"'a' ".repeat(60000)}> <SRC_DIR>/a.ts`],
+  // a quoted or escaped redirect target keeps its blanks: judged whole, not cut at the first one
+  ['quoted redirect into the project root (deny)', 2, `npm test > "${rootPath}/test.log" 2>&1`],
+  ...(hasParent ? [['quoted redirect through a folder with a space (deny)', 2, `echo done >> "${viaSpace}/notes.txt"`]] : []),
+  ...(hasParent ? [['single-quoted redirect through a folder with a space (deny)', 2, `echo x > '${viaSpace}/notes.txt'`]] : []),
+  ...(hasParent ? [['quoted redirect through a folder with a space (deny, PowerShell)', 2, `npm test > "${viaSpace.split('/').join(BS)}${BS}test.log"`]] : []),
+  ...(hasParent ? [['escaped-space redirect into the project (deny)', 2, `echo x > ${viaSpace.split(' ').join(`${BS} `)}/notes.txt`]] : []),
+  ...(hasParent ? [['quoted redirect to a sibling named like the project (allow)', 0, `echo x > "${rootPath} notes/out.txt"`]] : []),
+  ['quoted redirect to a scratch path with a space (allow)', 0, `git diff > "${S}/my notes/diff.txt"`],
+  // a search behind a launcher is text; git behind one is still git
+  ['a search behind xargs naming git commit (allow)', 0, 'git ls-files | xargs grep -n "git commit"'],
+  ['a search behind find -exec naming git push (allow)', 0, 'find . -name "*.md" -exec grep -l "git push" {} +'],
+  ['a search behind xargs naming gh and sed -i (allow)', 0, 'git ls-files | xargs grep -n "gh pr create" | grep -v "sed -i"'],
+  ['git add behind xargs (deny)', 2, 'git ls-files -m | xargs git add'],
+  ['git add behind find -exec (deny)', 2, 'find . -name "*.ts" -exec git add {} +'],
+  ['git push through Start-Process, one string (deny, PowerShell)', 2, "Start-Process git -ArgumentList 'push origin main'"],
+  // gh and the in-place tools only where a shell runs them: a quoted argument of another command is text
+  ['gh words in echo text (allow)', 0, 'echo "next: gh pr create"'],
+  ['gh words in a test name (allow)', 0, 'npm test -- -t "gh release create"'],
+  ['gh words in Write-Host text (allow, PowerShell)', 0, 'Write-Host "then run gh pr merge"'],
+  ['sed -i in echo text (allow)', 0, 'echo "use sed -i to fix"'],
+  ['gh pr create with a quoted title (deny)', 2, 'gh pr create --title "a b"'],
+  ['gh graphql mutation in quotes (deny)', 2, "gh api graphql -f query='mutation { x }'"],
+  ['gh behind xargs (deny)', 2, 'echo 3 | xargs gh pr close'],
+  ['gh inside node -e (deny)', 2, `node -e "require('child_process').execSync('gh pr create')"`],
+  ['gh text piped into bash (deny)', 2, "echo 'gh pr create' | bash"],
+  ['sed -i text piped into sh (deny)', 2, 'echo "sed -i s/a/b/ x.md" | sh'],
+  ['gh held in a variable (deny)', 2, 'true; C="gh pr create"; $C'],
+  ['sed -i with a quoted script (deny)', 2, "sed -i 's/a/b/' <SRC_DIR>/a.ts"],
+  // rename only as a file API
+  ['pandas rename in a one-liner (allow)', 0, `python -c "import pandas as pd; df = pd.DataFrame().rename(columns={'a': 'b'}); print(df)"`],
+  ['fs.renameSync in a one-liner (deny)', 2, `node -e "require('fs').renameSync('<SRC_DIR>/a.ts', '<SRC_DIR>/b.ts')"`],
+  ['os.rename in a one-liner (deny)', 2, `python -c "import os; os.rename('<SRC_DIR>/a.ts', '<SRC_DIR>/b.ts')"`],
+  ['Path(...).rename in a one-liner (deny)', 2, `python -c "from pathlib import Path; Path('<SRC_DIR>/a.ts').rename('<SRC_DIR>/b.ts')"`],
+  // a bracketed name that exists as written is one file, not a glob
+  ['rm a file under a bracketed folder (allow)', 0, 'rm "blog/[slug]/page.tsx"', brackets],
+  ['Remove-Item -LiteralPath a bracketed file (allow, PowerShell)', 0, 'Remove-Item -LiteralPath "[id].tsx"', brackets],
+  ['rm a bracket glob that names no file (deny)', 2, 'rm "blog/[ab].ts"', brackets],
+  ['rm -r a bracketed folder (deny)', 2, 'rm -r "blog/[slug]"', brackets],
+  ['rm a bracketed file and a second path (deny)', 2, 'rm "blog/[slug]/page.tsx" "[id].tsx"', brackets],
+  // everyday formatters and in-place tools, at command position whatever starts them; their check forms pass
+  ['bare prettier --write (deny)', 2, 'prettier --write .'],
+  ['bare prettier --check (allow)', 0, 'prettier --check .'],
+  ['prettier from node_modules/.bin (deny)', 2, './node_modules/.bin/prettier --write .'],
+  ['bun x prettier --write (deny)', 2, 'bun x prettier --write .'],
+  ['bare eslint --fix (deny)', 2, 'eslint --fix .'],
+  ['bare eslint (allow)', 0, 'eslint .'],
+  ['npx stylelint --fix (deny)', 2, 'npx stylelint --fix "**/*.css"'],
+  ['npx stylelint (allow)', 0, 'npx stylelint "**/*.css"'],
+  ['isort (deny)', 2, 'isort .'],
+  ['isort --check-only (allow)', 0, 'isort --check-only .'],
+  ['isort --diff (allow)', 0, 'isort --diff .'],
+  ['goimports -w (deny)', 2, 'goimports -w .'],
+  ['goimports -l (allow)', 0, 'goimports -l .'],
+  ['goimports -d (allow)', 0, 'goimports -d .'],
+  ['golangci-lint run --fix (deny)', 2, 'golangci-lint run --fix'],
+  ['golangci-lint run (allow)', 0, 'golangci-lint run ./...'],
+  ['dotnet csharpier (deny)', 2, 'dotnet csharpier .'],
+  ['dotnet csharpier --check (allow)', 0, 'dotnet csharpier --check .'],
+  ['yq -i (deny)', 2, "yq -i '.a = 1' x.yml"],
+  ['yq read (allow)', 0, "yq '.a' x.yml"],
+  ['sort -o into the tree (deny)', 2, 'sort -o x.txt x.txt'],
+  ['sort -o to /tmp (allow)', 0, 'sort -o /tmp/x.txt x.txt'],
+  ['ruby -pi (deny)', 2, `ruby -pi -e 'gsub(/a/, "b")' x.rb`],
+  ['ruby -I lib running a script (allow)', 0, 'ruby -I lib test/x_test.rb'],
+  ['make fmt, the project task (allow)', 0, 'make fmt'],
 ];
 
 let failed = 0;
-for (const [name, want, command] of cases) {
+for (const [name, want, command, cwd = root] of cases) {
   const tool = name.includes('PowerShell') ? 'PowerShell' : 'Bash';
   // The hook's own timeout: a guard killed there allows the call.
   const r = spawnSync('node', [guard], {
-    input: JSON.stringify({ tool_name: tool, tool_input: { command }, cwd: root }),
+    input: JSON.stringify({ tool_name: tool, tool_input: { command }, cwd }),
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PROJECT_DIR: root },
     timeout: 10000,
@@ -326,5 +406,6 @@ for (const [name, want, command] of cases) {
   if (!ok) failed += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(44)} exit ${r.status}  ${(r.stderr ?? '').trim().slice(0, 50)}`);
 }
+rmSync(brackets, { recursive: true, force: true });
 console.log(`${cases.length - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

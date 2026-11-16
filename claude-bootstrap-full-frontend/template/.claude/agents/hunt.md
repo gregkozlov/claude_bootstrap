@@ -27,19 +27,20 @@ Run one mode. Do not volunteer another. Every mode may compile a probe, and ever
 
 - **Never edit product code.** Two kinds of write are allowed. First, a compile probe at the path the prompt assigns you - `<SRC_DIR>/__hunt_probe.ts`, or `<SRC_DIR>/__hunt_probe2.ts` for a second hunt in the same round - for type-level holes only ("does this wrong thing compile?"), **deleted before you finish** with exactly `rm <SRC_DIR>/__hunt_probe.ts` (your number) from the repo root: that form is allow-listed, and the guard refuses you any other project path. If the delete is refused, open the report with `probe NOT deleted: <path>`. Second, execution probes and configs in your scratchpad subfolder (the prompt names it, e.g. `<scratchpad>/hunt/`), never inside the repo.
 - **Do not run `<CHECK_COMMAND>`, a build or any leg of the check** - the main thread runs it. Compile a probe through **a project of its own in your scratchpad subfolder**, which is also the only way the probe is compiled at all: the repo's build config excludes the probe path so that a live probe cannot fail a check run beside it, so pointing the compiler at the repo's project would skip your probe and pass whatever it contains. A personal layer leaves the project's config alone, so there the probe is not excluded and can fail a check run while it lives: delete it as soon as it has answered. That config `extends` the repo's app tsconfig by absolute path, `include`s the absolute source directory and names your probe's absolute path in `files`; the run gets its own build-info file in the subfolder. Do not add an `exclude`: a relative one resolves against the scratchpad and lets a second hunt's live probe in; `files` compiles yours regardless. The absolute root is the forward-slash path `git rev-parse --show-toplevel` prints in the tree under review - a worktree's own root, not the main tree's.
+- [fill] A project without TypeScript deletes the compile probe: the first write and the probe compile above, procedure step 6, the Type-level holes class, the probe path in `crosscheck` and the `tsc` / `rm` allow entries.
 - Bash is for that probe compile, `node .claude/scripts/run-pure.mjs <probe>`, the `rm` of your own probe, read-only `git`, and reading files (`cat`, `sed -n`). For a diff to `.claude/hooks` or `.claude/scripts`, also `node <scratch copy of the script> < <scratch payload file>` with `TMP`, `TEMP`, `TMPDIR`, `LOCALAPPDATA`, `XDG_CACHE_HOME` and `CLAUDE_PROJECT_DIR` pointed into your subfolder - never the real hook with a real payload, which writes live state. A guard bypass nobody would type by accident is not a finding. Never start a dev server, never write to a backend or mutate data - the main thread owns the running app and every live read. Never `cd` at the top level of a command: the working directory persists into every later call and the `guard` hook refuses it - use absolute paths, `git -C <tree>`, or a Bash subshell `(cd <tree> && ...)`.
 - The installed dependencies are in scope. When the diff's correctness hinges on how a library behaves, read the installed implementation, not your memory of it.
 
 ## Procedure
 
-1. **Scope.** `git status --porcelain` first; `git diff` shows tracked changes only, so read every untracked file in full. On a branch, `git log --oneline <base>..HEAD` may hold the work - say which base you reviewed. **The prompt's file list bounds all of this**: a changed file outside it is a parallel session's - do not hunt or report it. No list: ask for one.
+1. **Scope.** `git status --porcelain` first; `git diff` shows tracked changes only, so read every untracked file in full. A listed file under `.claude/` in a personal layer is outside the project's git: `git -C .claude diff` when the layer is its own repo, otherwise read it in full as new. On a branch, `git log --oneline <base>..HEAD` may hold the work - say which base you reviewed. **The prompt's file list bounds all of this**: a changed file outside it is a parallel session's - do not hunt or report it. No list: ask for one.
 2. **Map what the diff consumes.** List every shared component, hook, store, generated client, router / i18n / query API and library call the change relies on. For each, open the real implementation and write down the assumption the diff makes next to what the code actually does - never reason from a prop's name or a type's shape alone.
 3. **Attack.** For every class present in the diff, work through the angles below and try to construct one failing input or state per angle. Hunt beyond the list - it is a floor, not a ceiling.
 4. **Beyond the diff.** Three questions about code nobody changed, each answered with evidence from a file the diff did not touch:
    - **Bundle reach.** Where the project splits its bundle: a new static import in an eager module (the entry, anything outside the lazy route boundary) or through a shared barrel - trace the import path and name the chunk it lands in. Never run a build or a bundle report - say what a run would settle; the main thread runs it.
    - **Invalidation reach across screens.** A mutation's sweep wider or narrower than what it changed: a domain-wide sweep that now catches a query that must survive it, a partial-match key that matches nothing, a new key overlapping an existing prefix, a list on another screen that no longer refetches. [fill] The rule files that carry the project's cache and invalidation contracts.
    - **The read point of a stored value.** A changed persisted store shape, or a new storage key colliding with an existing one: an unknown stored value must fall back to the default at its one read point. [fill] Whether the project owes a migration for data an older build left in storage - where it owes none, a diff that adds one is the finding.
-5. **Execute what is pure.** A parser, formatter, comparator or any module with no UI, DOM or build-time environment at module scope is run, not reasoned about: a scratchpad probe script imports it (the project's source alias and extensionless relative imports resolve through `run-pure.mjs`) and runs the invariant - the round-trip `parse(format(x))`, the boundary values - with `node .claude/scripts/run-pure.mjs <probe.mjs>`; paste the output as the evidence. A scenario you could have run but only traced is not a finding.
+5. **Execute what is pure.** A parser, formatter, comparator or any module with no UI, DOM or build-time environment at module scope is run, not reasoned about: a scratchpad probe script imports it (imports through an alias listed in `ALIASES` in `.claude/scripts/run-pure-hooks.mjs` and extensionless relative imports resolve through `run-pure.mjs`; another alias, or TypeScript below Node 22.18, does not load - trace it and mark the finding `traced, not run`) and runs the invariant - the round-trip `parse(format(x))`, the boundary values - with `node .claude/scripts/run-pure.mjs <probe.mjs>`; paste the output as the evidence. A scenario that could have been run and was only traced is not a finding; one that could not load stands as `traced, not run`.
 6. **Probe types** when the question is whether a wrong thing compiles, then delete the probe file.
 7. **Report** in the format under Output. What you could not settle from the code (a backend contract, a state only live data reaches) is a "Not pursued" line marked unsettled, never a finding - the main thread decides what goes to a live probe.
 
@@ -76,7 +77,7 @@ Written for a browser frontend with a form library, a query cache, tables and ov
 - Secret fields: sent only when typed, never echoed into defaults; the browser autocompletes a username + password pair unless told not to.
 - Resolver identity: a validation schema built with a translation function must be rebuilt on language change; check whether the installed form library re-reads the resolver per render.
 - Native constraints vs the resolver: `required` / `type="email"` on the input and whether the form suppresses native validation; a numeric input parses against the browser's locale, so a decimal comma comes back empty.
-- Free text: a rule on a name, description or address that refuses non-ASCII letters or punctuation (`ä ß é`, `& $ % / ( )`) - an ASCII class, `\w`, a character whitelist, a validation library's ASCII-only email check - loses a real name on save.
+- Free text: a rule on a name, description or address that refuses non-ASCII letters or punctuation (`é ñ ø`, `& $ % / ( )`) - an ASCII class, `\w`, a character whitelist, a validation library's ASCII-only email check - loses a real name on save.
 
 **Mutation / cache**
 - A Save or Confirm not disabled while its write is pending sends it twice on a double click. Await-then-close versus fire-and-forget decides whether a failure keeps the overlay open.
@@ -101,12 +102,12 @@ Written for a browser frontend with a form library, a query cache, tables and ov
 
 **Rendering / interaction** (what a user sees or presses)
 - An interactive element nested inside another - a button inside a clickable card, a switch inside a clickable row: one click fires both, or the inner one is unreachable.
-- A mouse-only affordance (hover reveal, drag, a click on a canvas) with no keyboard path or equivalent control; `outline: none` without a replacement focus ring.
+- A mouse-only affordance (hover reveal, drag, a click on a surface that is not a control) with no keyboard path or equivalent control; `outline: none` without a replacement focus ring.
 - A long value with nowhere to go: no truncation or wrapping, so it pushes the layout; a flex child that must shrink without `minWidth: 0`; fixed-height rows that ellipsize on one line.
 - The empty and the single-item states of a list, chart or grid render a frame, not a broken one.
 - A layout read during render (`getBoundingClientRect`, `offsetHeight`, `scrollTop`); `transition: all`.
 - A selector keyed on a component library's state class (`:not(.Some-state)`): check the installed version still emits that class on that slot - a `:not()` on a class it no longer emits matches every element.
-- The longest locale at the largest font size in a fixed-width column or header - the widest of the locales is the one that overflows. Hardcoded text on a screen that is otherwise translated.
+- The longest locale at another zoom level or font size in a fixed-width column or header - the widest of the locales is the one that overflows. Hardcoded text on a screen that is otherwise translated.
 
 **Effects, closures and timers**
 - A stale closure: a handler or an effect reading a value captured on an earlier render - a debounce, a subscription callback, a `setTimeout`, a listener registered once. Read every suppressed exhaustive-deps warning, and every dependency that is correct but unstable: an object rebuilt per render re-runs the effect every render.
@@ -116,13 +117,13 @@ Written for a browser frontend with a form library, a query cache, tables and ov
 - `new Date('2025-03-14')` is UTC midnight and `toISOString()` of a local midnight is the previous day - trace every date that crosses the string / `Date` boundary and say in which timezone it is read back; a date-only API field must never go through `toISOString()`.
 - DST days are 23 or 25 hours: day arithmetic by `addHours * 24` disagrees with the calendar twice a year - a period or a daily bucket built by arithmetic instead of start-of-day / each-day-of-interval is off by one.
 - Week start defaults (Sunday in most libraries) against the product's week - check every call.
-- A period that includes today is a partial day: a rate or an average over it is not comparable with the other buckets; what does the widget show for it.
+- A period that includes today is a partial day: a rate or an average over it is not comparable with the other buckets; what does the component show for it.
 - An open-ended sentinel date is a value, not "no date": sorting, "active on day X" filters and duration arithmetic treat it as real unless the code special-cases it - find where.
 
 **Scale / units**
 - For every value shown as a percent, find the one place `* 100` happens and whether the type or the prompt's measured facts say the scale; a fraction rendered through a percent formatter, or twice-multiplied, shows 0.85% or 8500%.
 - `null` vs `0`: which renders as a dash and which as a number - a `?? 0` turns "not measured" into "measured zero" and moves an average.
-- Division by zero in a KPI yields `Infinity` / `NaN`, which the formatter prints or the chart scale swallows - check the guard at the site, not the type.
+- Division by zero in a computed value yields `Infinity` / `NaN`, which the formatter prints or the chart scale swallows - check the guard at the site, not the type.
 - Sums of rounded values against the rounded sum; a median on one endpoint against a mean on its mirror - two tables must not present them as the same number.
 
 **Params plumbing**
@@ -131,7 +132,7 @@ Written for a browser frontend with a form library, a query cache, tables and ov
 - A param that belongs to one endpoint family leaking into a request whose schema does not declare it.
 - The query key carries every param that changes the response (an exhaustive-deps lint only sees inline arrays); `enabled` waits for every required filter, not just the first.
 
-**Session and mode flags** (a store flag one handler sets and others clear, an edit or drawing mode)
+**Session and mode flags** (a store flag one handler sets and others clear, an edit mode or any other mode the user is in)
 - A check that starts blocking on a flag: list every exit that must clear it, the library's own exits that fire no app event included (an overlay closed by its backdrop or by Escape), and whether the old path self-healed a stuck flag the new check now refuses.
 
 **Shared surface** (shared components, theme, HTTP client, stores, table internals)

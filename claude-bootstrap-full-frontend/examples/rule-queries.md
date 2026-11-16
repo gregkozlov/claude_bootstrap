@@ -7,9 +7,9 @@ paths:
   - 'src/widgets/**/*Chart/index.tsx'
   - 'src/pages/*/index.tsx'
   - 'src/pages/*DetailPage/hooks/*.ts'
-  - 'src/pages/OrdersPage/Modals/*/index.tsx'
-  - 'src/pages/{CatalogPage,AccountPage}/Tabs/*/index.tsx'
-  - 'src/pages/SuppliersPage/hooks/use{SupplierOptions,LeadTimeHistory}.ts'
+  - 'src/pages/*/Modals/*/index.tsx'
+  - 'src/pages/*/Tabs/*/index.tsx'
+  - 'src/pages/*/hooks/use*.ts'
   - 'src/components/FiltersBar/**'
   - 'src/components/DateRangeField/**'
   - 'src/routes/hooks/*.ts'
@@ -19,7 +19,7 @@ paths:
   - 'src/api/*/*.ts'
 ---
 
-> Example from an inventory analytics frontend (React 19 + MUI + TanStack Query v5 + i18next). Not part of the template - copy it by hand. A path-scoped rule with a measured glob list, each glob narrowed to the files that hold query calls (`hooks/*.ts`, not `hooks/**`), and written by class: one dense paragraph per convention, a fact that another rule owns pointed to rather than restated; note the grep standing in for a count. The `.claude/rules/*.md` files it points to are the example project's own rules, not shipped.
+> Example from an inventory analytics frontend (React 19 + MUI + TanStack Query v5 + i18next). Not part of the template - copy it by hand. A path-scoped rule with a measured glob list, each glob narrowed by pattern to the files that hold query calls (`hooks/*.ts`, not `hooks/**`; a file shape such as `Modals/*/index.tsx`, never a list of today's page names), and written by class: one dense paragraph per convention, a fact that another rule owns pointed to rather than restated; note the grep standing in for a count. The `.claude/rules/*.md` files it points to are the example project's own rules, not shipped.
 
 # Query call sites
 

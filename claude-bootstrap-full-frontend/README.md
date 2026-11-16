@@ -1,9 +1,9 @@
 # Claude Code working layer - full, for a frontend
 
-A ready-made Claude Code setup for a **codebase with a UI** (a smaller plan takes [light-frontend](../claude-bootstrap-light-frontend/README.md), a server codebase [light-backend](../claude-bootstrap-light-backend/README.md)): one task lifecycle, one review ladder, guard hooks, and review agents with one job each.
+A ready-made Claude Code setup for a **codebase with a UI** (a smaller plan takes [light-frontend](../claude-bootstrap-light-frontend/README.md), a server codebase [light-backend](../claude-bootstrap-light-backend/README.md)): one task lifecycle, one review ladder, guard hooks, and review agents with one job each. Terms: [Glossary](#glossary).
 
 > [!IMPORTANT]
-> Paste the prompt below into Claude Code, opened in your project, with the path filled in. Run it on **Opus at high effort**: start with `claude --model opus --effort high`, or type `/model opus` and then `/effort high` in a running session. Allow the bootstrap folder when asked, or add it first with `/add-dir <path to this folder>`.
+> Paste the prompt below into Claude Code, opened at the repository root of your project, with the path filled in. Run it on **Opus at high effort**: start with `claude --model opus --effort high`, or type `/model opus` and then `/effort high` in a running session. Allow this folder too: start with `--add-dir "<path to this folder>"`, or run `/add-dir <path to this folder>` first.
 
 ```text
 Integrate the Claude Code working layer I unpacked at <path to this folder> into this project.
@@ -28,15 +28,15 @@ The same prompt updates a layer installed from an older version of this bootstra
 ## Install
 
 1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it anywhere **outside** your project. You need one folder of it: `claude-bootstrap-full-frontend`.
-2. Open Claude Code in your project as the box above says, and paste the prompt. `--add-dir` saves only the prompts for reading the bootstrap. Each copy still asks once - about 34 for this layer.
+2. Open Claude Code at the repository root of your project as the box above says, and paste the prompt. `--add-dir` saves only the prompts for reading the bootstrap. Each copy still asks once - about 34 for this layer.
 3. Its first question is where the layer lives in git (table below). After that it asks only what the repo cannot answer - usually whether "never commit" stays and whether the browser check is on, and the check command if the project has none.
-4. Restart Claude Code, then run `/maintain-ai-layer init`. It writes the project sections of the layer's `CLAUDE.md`, builds the path-scoped rules from your code, and tunes the agents and skills to the project.
+4. Restart Claude Code with the same flags, then run `/maintain-ai-layer init`. It writes the project sections of the layer's `CLAUDE.md`, builds the path-scoped rules from your code, and tunes the agents and skills to the project.
 
 **Where the layer lives:**
 
 | Mode | What you get |
 | --- | --- |
-| **Personal, own repo** (recommended) | The whole layer in `.claude/`, hidden from the project's git by `.git/info/exclude`, and `.claude/` is your own git repo - history and a backup, and `git clean` or `git stash -a` in the project cannot delete it. Create a private repo and push the layer there; the install prints the commands. |
+| **Personal, own repo** (recommended) | The whole layer in `.claude/`, hidden from the project's git by `.git/info/exclude`, and `.claude/` becomes your own git repo once you run the five commands the install prints (`git init`, a first commit, a push to a private repo you create). Until then it has no history, and `git clean -x` or `git stash -a` can delete it. |
 | **Personal, no history** | The same, without the repo. |
 | **Team** | The layer is committed with the project, in the root `CLAUDE.md` and `.claude/`. |
 
@@ -69,6 +69,8 @@ Say you ask for "a date-range filter on the orders page":
 
 Agents launched per task. Any task may also start one `Explore` to survey an unfamiliar area, and an agent your project adds (a translations owner, say) runs when its own condition fires.
 
+`CLAUDE.md` loads on every turn: about 15 KB, budget 32 KB. The Stop hook reruns your check command after each turn that changed files; if it needs more than about 150 s, point `CHECK` in `stop-check.mjs` at a faster subset (`.claude/hooks/README.md`).
+
 | Task | Agents | Launches |
 | --- | --- | --- |
 | Super-trivial edit (tier 0) | none | 0 |
@@ -89,7 +91,7 @@ A second round runs only when a fix changed logic beyond what a reviewer prescri
 
 | Mode | Launches |
 | --- | --- |
-| `init`, first run | 4 survey agents; then one per code area of up to ~250 source files, one for the root config files and one reading the fix history; then one per new rule family |
+| `init`, first run | 4 survey agents; then one per code area of up to ~250 source files, one for the root config files and one reading the fix history; then one per new rule family (a rule and the sibling rules split off it) |
 | `init`, later runs | 4 survey agents; one `drift` per rule; one per rule family; 4 looking for rules the code needs |
 | `deep` (monthly) | 1 count check; one `drift` per unit (each `CLAUDE.md` section, rule, agent, skill and doc), eight at a time; one per rule family; 4 looking for rules; 2 walking whole tasks |
 
@@ -105,16 +107,16 @@ A second round runs only when a fix changed logic beyond what a reviewer prescri
 
 ## What is in it
 
-- **One lifecycle** of nine steps. Steps 1-2 sit in `CLAUDE.md` (Development Workflow), because they run before and inside plan mode. Steps 3-9 sit in the `lifecycle` skill, loaded once step 2 closes: implement, the editor batch, review, browser check, docs, the unverified list, one final check.
+- **One lifecycle** of nine steps. Steps 1-2 sit in `CLAUDE.md` (Development Workflow), because they run before and inside plan mode. Steps 3-9 sit in the `lifecycle` skill, loaded once step 2 closes: implement, the editor batch (`twins`, `comments` and the project's own editor agents, launched together), review, browser check, docs, the unverified list, one final check.
 - **One review ladder** in the `crosscheck` skill, picked by triggers, not by counting. Tier 0 has no reviewer, tier 1 `gate`, tier 2 `gate` + `hunt`, tier 3 adds `hunt` on the plan and `drift` at the end. `init` tunes the triggers to the classes that produced a bug in your project.
 - **The reachability bar** in `CLAUDE.md`. A defect counts only when one real user reaches it through the interface in ordinary work, with a stated click path. The cases out of scope are named, so reviewers stop spending rounds on them.
 - **One browser ritual** in the `verify-live` skill. It finds the port your dev server listens on, confirms through the marker endpoint that it is this checkout's server, and reads the page before clicking anything. `dev-servers.mjs` runs on Windows, macOS and Linux (`lsof` / `ps` off Windows, `ss` as the Linux fallback).
 - **A folder per session** under `.claude/sessions/`, ignored by git. It holds one task file per task (the Brief, the findings and their decisions, the open risks) and the `precompact` handoff. `compact-pointer.mjs` names it at session start and carries it across a compaction.
-- **Hooks** in `.claude/hooks/`. `guard.mjs` refuses git writes, `gh` writes, shell edits and copies into the tree, a delete of more than one file per call, a top-level `cd`, edits to generated files, and dash characters - before the call runs. `stop-check.mjs` runs the check command when a turn changed the tree, and blocks once on a failure. `upkeep-nudge.mjs` asks for `/maintain-ai-layer` when it is 30 days overdue.
+- **Hooks** in `.claude/hooks/`. `guard.mjs` refuses git writes, `gh` writes, shell edits and copies into the tree, a delete of more than one file per call, a top-level `cd`, edits to generated files, and dash characters - before the call runs. `stop-check.mjs` runs the check command when a turn changed the tree, and blocks once on a failure. `upkeep-nudge.mjs` asks for `/maintain-ai-layer` once the last pass is 30 days old.
 - **Agents with fences.** `gate` reviews against the Brief and the conventions; `hunt` hunts runtime defects, each a traced scenario; `twins` finds the same pattern elsewhere; `drift` checks docs against code; `comments` cuts comments. Only `comments` edits, and only comment text; `hunt` writes nothing but its compile probe.
 - **Rule reach.** `.claude/scripts/rules-reach.mjs` measures which files each path-scoped rule loads for, because a rule that does not load where its code lives does not exist. The template ships no rule: `init` builds the set from your code.
 - **Settled decisions** in `.claude/docs/decisions.md`: the won't-dos, rejected fixes and verified-clean claims. Every reviewer greps it, and a match is reported as settled instead of re-filed. The entries are the owner's.
-- **Skills**: `lifecycle`, `crosscheck`, `debug` (root cause before any fix), `verify-live`, `precompact` (the handoff file), `retro` (on request, numbered improvements from the session) and `maintain-ai-layer`. Its modes: `deep` (the default, monthly), `rules` (the rule set alone) and `init` (the project parts after an install).
+- **Skills**: `lifecycle`, `crosscheck`, `debug` (root cause before any fix), `verify-live`, `precompact` (the handoff file), `retro` (on request, numbered improvements from the session) and `maintain-ai-layer`. Its modes: `deep` (monthly; the default once the layer's `CLAUDE.md` has no `[fill]` line left - until then a bare `/maintain-ai-layer` runs `init`), `rules` (the rule set alone) and `init` (the project parts after an install).
 
 ## Verify
 
@@ -151,7 +153,7 @@ Each case line reads `ok` and each suite ends with `N passed, 0 failed`.
 | --- | --- | --- |
 | `<PROJECT>` | project name | `stockroom` |
 | `<STACK>` | the stack in one line, goes into the agents' first sentence | `React + TypeScript on Vite, ...` |
-| `<SRC_DIR>` | source directory, no trailing slash; also the import alias `run-pure.mjs` resolves | `src` |
+| `<SRC_DIR>` | source directory, no trailing slash; also the folder the import aliases `run-pure.mjs` resolves point at (`<SRC_DIR>/` and `@/` until `init` tunes them) | `src` |
 | `<CHECK_COMMAND>` | the one verification call; the lifecycle, the Stop hook and the allow list use it | `npm run check` |
 | `<DEV_PORT_RANGE>` | ports `dev-servers.mjs` scans | `5173-5179` |
 | `<DEV_BASE_PATH>` | the app's base path with both slashes; the marker lives at `<DEV_BASE_PATH>__tree` | `/stockroom/` |

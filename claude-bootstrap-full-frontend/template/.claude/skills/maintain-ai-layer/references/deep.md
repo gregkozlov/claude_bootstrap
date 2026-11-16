@@ -8,15 +8,17 @@ Run these, and copy the numbers into the task file:
 
 ```bash
 git -C <root> branch --show-current && git -C <root> log --oneline -1 && git -C <root> status --short
-wc -c $(grep -l "Layer tracking" <root>/CLAUDE.md <root>/.claude/CLAUDE.md 2>/dev/null)   # the layer's CLAUDE.md (SKILL.md)
+L=$(grep -l "Layer tracking" <root>/CLAUDE.md <root>/.claude/CLAUDE.md 2>/dev/null); echo "$L"; wc -c "$L"   # the layer's CLAUDE.md (SKILL.md)
 node <root>/.claude/scripts/rules-reach.mjs             # weight report: per-file rule text, per-rule reach, globs matching nothing
 node <root>/.claude/scripts/rules-reach.mjs --check     # glob shape + the 20 KiB per-rule budget
 node <root>/.claude/skills/maintain-ai-layer/layer-refs.mjs   # dead paths, package scripts, skill and agent names in every tracked *.md
 ```
 
+`$L` in a later command is this variable: a new Bash call sets it again with the same line. An own-repo layer: also `git -C <root>/.claude status --short` - uncommitted layer work is the owner's to commit before the run.
+
 ## M2. Mechanical fixes
 
-- **`layer-refs` hits.** Find where each dead reference went (`git log --diff-filter=R --name-status -- <old path>`, or grep the identifier) and correct it. A path or `npm run` command that is deliberately named as something that must not exist or is not tracked (a forbidden folder, a refused command form, a gitignored hand-copy, a placeholder in an example) is not stale. Leave it, and note it once in the task file.
+- **`layer-refs` hits.** Find where each dead reference went (`git log --diff-filter=R --name-status -- <old path>`, or grep the identifier) and correct it; a hit in a file the layer does not own is reported, not edited. A path or `npm run` command that is deliberately named as something that must not exist or is not tracked (a forbidden folder, a refused command form, a gitignored hand-copy, a placeholder in an example) is not stale. Leave it, and note it once in the task file.
 - **`rules-reach` problems.** Fix every `SHAPE` line and every "Globs matching nothing" cell. For such a glob, find where its code went, and point the glob there or drop it. A rule left with no glob at all is merged into a neighbour or deleted. A `FAIL` from `--check` is a rule over the budget: trim it by class (`references/rules.md` R4).
 
 ## M3. Counts
@@ -35,7 +37,7 @@ From the `rules-reach` report:
 
 - **`CLAUDE.md`:** delete text that is true but dead - a status, an instruction for a change already applied, an alternative nothing uses, a paragraph a loaded rule already says. Report the bytes before and after.
 - **Agents:** check that each `tools:` line fits its body. An agent told to edit needs `Edit`. A "read-only" agent with `Edit` or `Write` must have a stated reason (the compile probe). Every mode that a skill or `CLAUDE.md` asks an agent for (`drift section`, `comments sweep`, `hunt area` / `refute`, and any mode a project agent carries) must exist in that agent's body. To check, grep `CLAUDE.md` and `.claude/skills` for each agent's name, then compare the modes they ask for with the agent file.
-- **Skills:** check that each step a skill hands to another skill or agent names one that exists (`layer-refs` covers the names). Check that the step numbers other files cite (`lifecycle step N`) match the `lifecycle` skill: `grep -rn "step [0-9]" CLAUDE.md .claude`.
+- **Skills:** check that each step a skill hands to another skill or agent names one that exists (`layer-refs` covers the names). Check that the step numbers other files cite (`lifecycle step N`) match the `lifecycle` skill: `grep -rn "step [0-9]" "$L" .claude --exclude-dir=sessions --exclude-dir=.git`.
 
 ## D1. drift over every unit
 
@@ -66,7 +68,7 @@ Two more checks:
 
 ## D4. Hooks and settings (report only)
 
-Every command in `.claude/settings.json` and `.claude/settings.local.json` `hooks` must point to an existing file, and every hook file must be registered and described in `.claude/hooks/README.md`. The deny list in `.claude/settings.json` must still match what `CLAUDE.md` "Version Control" forbids. The README is fact-checked in D1. A mismatch goes to the report, and nothing under `.claude/hooks/` or in `settings*.json` is edited.
+Every command in `.claude/settings.json` and `.claude/settings.local.json` `hooks` must point to an existing file, and every hook file must be registered and described in `.claude/hooks/README.md`. The deny list must still match what `CLAUDE.md` "Version Control" forbids - in `.claude/settings.json`, or in `.claude/settings.local.json` for a personal layer beside a tracked team `settings.json`. Run the hooks' self-tests (`.claude/hooks/tests/*.mjs`, each with `node`): each case line reads `ok` and each suite ends with `N passed, 0 failed`. The README is fact-checked in D1. A mismatch goes to the report, and nothing under `.claude/hooks/` or in `settings*.json` is edited.
 
 ## D5. Memory
 
@@ -97,4 +99,4 @@ Each agent returns only the breaks. A break is a step that cannot run as written
 
 ## D7. Verify and report
 
-Re-run the M1 commands. Then run `<CHECK_COMMAND>`: a failure in a file this run did not touch belongs to a parallel session, so say so and leave it. Then write the report (`SKILL.md` "Report").
+Re-run the M1 commands. Then run `<CHECK_COMMAND>`: a failure in a file this run did not touch belongs to a parallel session, so say so and leave it. Then stamp the run (`SKILL.md` "Stamp the run") and write the report (`SKILL.md` "Report").

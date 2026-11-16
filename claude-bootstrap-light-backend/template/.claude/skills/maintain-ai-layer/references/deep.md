@@ -1,6 +1,6 @@
 # deep mode
 
-The routine pass, about once a month - the session-start reminder says when it is due, and the mode is the default with no argument. The mechanical checks run as commands in the main thread (D1-D3); then one `drift` per unit of the layer (D4), the rule steps (D5), cross-file consistency (D6), the hooks (D7), the memory (D8) and a walk of whole tasks through the lifecycle (D9). It costs dozens of agent launches, all on Sonnet (`SKILL.md`).
+The routine pass, about once a month - the session-start reminder says when it is due, and the mode is the default with no argument on a filled layer. The mechanical checks run as commands in the main thread (D1-D3); then one `drift` per unit of the layer (D4), the rule steps (D5), cross-file consistency (D6), the hooks (D7), the memory (D8) and a walk of whole tasks through the lifecycle (D9). It costs dozens of agent launches, all on Sonnet (`SKILL.md`).
 
 ## D1. Baseline
 
@@ -9,13 +9,15 @@ Run these and copy the numbers into the run file:
 ```bash
 git branch --show-current && git log --oneline -1 && git status --short
 L=$(grep -l "Layer tracking" CLAUDE.md .claude/CLAUDE.md 2>/dev/null); echo "$L"; wc -c "$L"   # the layer's CLAUDE.md
-ls .claude/rules/ 2>/dev/null && wc -c .claude/rules/*.md                # the rule count and bytes
+ls .claude/rules/ 2>/dev/null && wc -c .claude/rules/*.md 2>/dev/null    # the rule count and bytes
 node .claude/skills/maintain-ai-layer/layer-refs.mjs      # dead paths, package scripts, skill and agent names in the layer's *.md
 ```
 
+`$L` in a later command is this variable: a new Bash call sets it again with the same line.
+
 ## D2. Mechanical fixes
 
-- **`layer-refs` hits.** Find where each dead reference went (`git log --diff-filter=R --name-status -- <old path>`, or grep the identifier) and correct it. A path or package command deliberately named as something that must not exist or is not tracked (a forbidden folder, a refused command form, a placeholder in an example) is not stale - leave it, and say so once in the report.
+- **`layer-refs` hits.** Find where each dead reference went (`git log --diff-filter=R --name-status -- <old path>`, or grep the identifier) and correct it; a hit in a file the layer does not own is reported, not edited. A path or package command deliberately named as something that must not exist or is not tracked (a forbidden folder, a refused command form, a placeholder in an example) is not stale - leave it, and say so once in the report.
 - **Rule globs.** For every `.claude/rules/*.md`, measure each glob of its `paths:` ("Measuring a rule" in `SKILL.md`). A glob matching nothing points at code that moved - point it there, or drop it. A rule left with no glob is merged into a neighbour or deleted; a rule with no `paths:` at all loads in every session - give it globs or move its text into `CLAUDE.md` within the budget.
 - **Counts.** Grep `CLAUDE.md` and the rules for a number or number word attached to something countable ("the six hooks", "two routes", "a handful of sites"), re-measure each with a command, and fix the wrong ones. Where a count keeps drifting, replace it with the grep that finds the sites.
 
@@ -48,7 +50,7 @@ Check that each rule is stated once. Find a statement that appears in two files 
 
 More checks:
 
-- The lifecycle steps live only in `CLAUDE.md` Development Workflow. A restatement elsewhere becomes a pointer, and every step number another file cites matches it: `grep -rn "step [0-9]" CLAUDE.md .claude`.
+- The lifecycle steps live only in `CLAUDE.md` Development Workflow. A restatement elsewhere becomes a pointer, and every step number another file cites matches it: `grep -rn "step [0-9]" "$L" .claude --exclude-dir=sessions --exclude-dir=.git`.
 - Every skill and agent a file names exists (`layer-refs` covers the names), and each agent's description matches how `CLAUDE.md` and the skills launch it: `hunt`'s two modes against what lifecycle steps 2 and 4 hand it, `drift`'s two against what lifecycle step 5 and this skill hand it.
 
 ## D7. Hooks and settings (report only)
@@ -83,4 +85,4 @@ Each agent returns only the breaks. A break is a step that cannot run as written
 
 ## D10. Verify and report
 
-Re-run the D1 commands, then the project's check command once, only when what it needs is already up: a failure in a file this run did not touch belongs to someone else - say so and leave it. Stamp the run and write the report (`SKILL.md`).
+Re-run the D1 commands, then the project's check command once, only when what it needs is already up: a failure in a file this run did not touch belongs to someone else - say so and leave it. Stamp the run - in team mode the stamp is one more file for the owner to commit - and write the report (`SKILL.md`).

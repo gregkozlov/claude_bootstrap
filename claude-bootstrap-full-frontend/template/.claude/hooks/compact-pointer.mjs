@@ -5,7 +5,8 @@
 //
 //   SessionStart - `additionalContext`: the session's id prefix, and the folder it has or the name to open one
 //                  under; after a compaction, also where to resume from. Nothing else tells the model its own session id.
-//   PreCompact   - `systemMessage`: the user sees the path before the summary.
+//   PreCompact   - one plain-text line: the harness adds a PreCompact hook's stdout to the instructions for the
+//                  compaction summary, so the summary itself carries the path.
 //   PostCompact  - `systemMessage` only: the harness rejects `hookSpecificOutput` for this event.
 //
 // Neither compaction event can write the handoff: no turn exists between the hook and the summary, so that
@@ -62,12 +63,10 @@ try {
     } else if (folder) {
       // Nothing to point at before compaction without a folder: this session never opened a task file.
       const where = `${SESSIONS_DIR}/${folder}/`;
-      let systemMessage = `Auto-compacting. This session's notes are in ${where}.`;
-      if (payload.hook_event_name === 'PostCompact') systemMessage = `Compaction done. This session's notes are in ${where}.`;
-      else if (payload.trigger === 'manual') {
-        systemMessage = `Compacting. This session's notes are in ${where} - a handoff needs /precompact before /compact, the summary will not carry one.`;
+      if (payload.hook_event_name === 'PostCompact') output = { systemMessage: `Compaction done. This session's notes are in ${where}.` };
+      else if (payload.hook_event_name === 'PreCompact') {
+        process.stdout.write(`Keep in the summary: this session's notes are in ${where} - read its task file before continuing.\n`);
       }
-      output = { systemMessage };
     }
     if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
   }

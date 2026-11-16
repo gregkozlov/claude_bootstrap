@@ -22,7 +22,7 @@ The run applies what it verified, like `deep`. "Writing a rule" below is read be
 
 **Shape problems.** `rules-reach.mjs` matches with `path.posix.matchesGlob` and prints a `SHAPE` line, exit 1 from `--check` and the report, wherever that and the loader disagree:
 
-- a missing, duplicated or empty `paths:` block list, or a line in it that is not a single-quoted item (a blank or `#` line included) - the loader also reads a string or a flow list, the script only the block form;
+- a missing, duplicated or empty `paths:` block list, or a line in it that is not a quoted item (a blank or `#` line included) - the loader also reads a string or a flow list, the script only the block form;
 - whitespace; a comma outside the brace group; nested or several brace groups; a brace group with one alternative, or an empty one;
 - per brace alternative: a stray slash (leading, trailing, `./`, `//`); a segment ending in `*` before `/**`; a folder glob such as `nginx/**` (stripped to a slash-less name, the loader matches it at any depth); a slash-less glob a nested file also matches; a glob without `/**` that matches a directory (the rule then loads for everything inside it).
 
@@ -77,7 +77,7 @@ Apply each fix after checking it with `--files` before and after. A section that
 - **Sections with a different audience** (R3's section map) move to a rule whose globs fit them: an existing one, or a split. The usual shape is `<name>.md` for the call sites and `<name>-internals.md` for the component's own folder. A split is made only when R3's map names files that stop loading the moved text, and the report after it must show that.
 - **One audience, still heavy** - trim instead: true-but-dead text, a mechanic only one process step needs (to that step's skill), a second copy.
 - **The floor:** a rule that would end under ~1 KB is merged into the rule whose globs it shares.
-- The pointers to the old file are re-aimed (`grep -rn --exclude-dir=sessions "<rule>.md" CLAUDE.md .claude`).
+- The pointers to the old file are re-aimed (`grep -rn --exclude-dir=sessions --exclude-dir=.git "<rule>.md" "$L" .claude`, `$L` as `references/deep.md` M1 sets it).
 
 A candidate `settled.md` already answered is logged as settled.
 
@@ -107,7 +107,7 @@ It lands as a line or a paragraph in the rule whose `paths:` reach those files, 
 
 ## R6. Verify
 
-`node .claude/scripts/rules-reach.mjs --check`, the report, `layer-refs` and `wc -c` of the layer's `CLAUDE.md` (`SKILL.md`, Standing rules), against R1. Then `references/deep.md` D7. `rules` does not stamp `.last-maintain`.
+`node .claude/scripts/rules-reach.mjs --check`, the report, `layer-refs` and `wc -c` of the layer's `CLAUDE.md` (`SKILL.md`, Standing rules), against R1. Then `references/deep.md` D7, without the stamp: `rules` does not stamp `.last-maintain`.
 
 ## R7. No project rule: build the set
 

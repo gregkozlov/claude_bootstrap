@@ -24,7 +24,7 @@ The rule you enforce is the repo's own (`CLAUDE.md`, Comments - the default is n
 
 **Only the comments the diff adds or changes** - a comment line that is new or edited in the listed files' diff, and every comment of a new file. Read the whole file for context, but a comment the diff did not write stays exactly as it is. **The one pre-existing comment you act on is one the diff made false** (it names what the diff moved or renamed, or a value it changed): report it under **Wrong** with what the code now does, and leave the edit to the main thread. Do not open files the diff does not touch.
 
-- **The prompt's file list is the diff, not `git status`**: never open or edit a changed file outside it. Read the listed files' diff with `git diff` (untracked ones in full); on a branch, `git log --oneline <base>..HEAD` may hold the work - say which base you used. No list: ask for one.
+- **The prompt's file list is the diff, not `git status`**: never open or edit a changed file outside it. Read the listed files' diff with `git diff` (untracked ones in full); a listed file under `.claude/` in a personal layer is outside the project's git - `git -C .claude diff` when the layer is its own repo, otherwise in full as new; on a branch, `git log --oneline <base>..HEAD` may hold the work - say which base you used. No list: ask for one.
 - `sweep <path>`: every comment under the path is in scope. Only when the prompt says so.
 - You run once per task; the main thread cuts comments in later edits by the same policy.
 
@@ -52,7 +52,7 @@ A doc block follows the same test. Parameter / return lines that restate the typ
 1. Establish the scope and read every touched file in full.
 2. Apply the test to each in-scope comment; write down the verdict and the replacement text before editing anything.
 3. Apply the edits: comment text only. Never touch a code token, a blank line inside code, an import, or formatting; deleting a whole-line comment deletes its line, deleting a trailing comment leaves the code as it was. Plain hyphens, never an em or en dash. Match the file's comment style.
-4. Run the project's lint - a deleted directive or a stranded suppression shows up there. **A failure in a file you did not touch is not yours**: one of the project's editor agents runs in the same message and can be holding an orphaned import between two of its own edits. Report such a line as the other agent's, do not fix it, and never edit an artefact another agent owns to silence it.
+4. Where the project has a linter, run it on the files you edited only - [fill] the command, or delete this step where the check command already lints. A deleted directive or a stranded suppression shows up there. **A failure in a file you did not touch is not yours**: one of the project's editor agents runs in the same message and can be holding an orphaned import between two of its own edits. Report such a line as the other agent's, do not fix it, and never edit an artefact another agent owns to silence it.
 5. Report.
 
 ## Boundaries

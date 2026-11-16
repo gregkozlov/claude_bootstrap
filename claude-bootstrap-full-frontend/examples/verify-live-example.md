@@ -1,6 +1,6 @@
 ---
 name: verify-live
-description: The browser check for a finished change against the right server and Chrome - lifecycle step 6, and on "/verify-live", "check it in the browser", "look at it in the app", "check it live". Never starts a server.
+description: Load it before any look at the running app in the browser - the lifecycle step 6 check, a bug reproduction, a live probe - and on "/verify-live", "check it in the browser", "look at it in the app", "check it live".
 ---
 
 > Example from an inventory analytics frontend served by Vite under the base path `/stockroom/`. Not part of the template - copy it by hand if it fits; the template ships the generic ritual. Depends on: the Claude in Chrome extension, `.claude/scripts/dev-servers.mjs`, the `/__tree` marker from `tree-marker-plugin.ts`, and a bundle measurement script of the project's own. Shows the ritual with the real endpoints, the dev-only tooling and the known console noise filled in.
@@ -9,14 +9,16 @@ description: The browser check for a finished change against the right server an
 
 The port and the Chrome are settled by facts, never by convention or by what a page looks like.
 
+**With `Browser check: off` in `CLAUDE.md`, open no browser.** Report "unverified - browser check off" with the surfaces a look would have covered, and hand back to the caller (lifecycle step 6, `debug` phase 1).
+
 ## The prohibitions - they hold through every step below
 
 - **The dev server is the owner's.** Connect to the one running; do not launch or kill one. Use `localhost` in every probe: Vite here listens on IPv6 only, so a failed `127.0.0.1` request proves nothing about the app.
 - **One origin: `http://localhost:<port>/stockroom/`.** `[::1]` is another origin with its own `localStorage`, so the app opens without the stored token and lands on `/login` - not a session bug.
-- **This machine's Chrome and no other.** `list_connected_browsers` may offer a browser on a different computer under the same account; never pick it, even as the only entry. Its page can look right while showing that computer's server, so the `/__tree` marker decides, not the page.
+- **This machine's Chrome and no other.** The dev server may run on another host, and `list_connected_browsers` may offer a browser that is not on this machine; never pick it, even as the only entry. A page alone never tells which host it shows, so the `/__tree` marker decides, not the page.
 - **Blocked means ask.** No local Chrome, an error page, a foreign `host` at `/__tree` after the single `switch_browser` of step 3, a failing browser tool or the login screen: tell the owner what you saw and what to do (open Chrome here, connect the extension, sign in), then wait. The check stays pending.
-- **Every write is asked for first.** Stockroom's dev server uses the shared staging backend, so a saved order or a deleted SKU is visible to the whole team. Before an approved write, record the row's fields and `version`. To undo it, re-read the row and send the old field values with the current `version` - the old snapshot fails with 409 - then re-read and compare `version` to confirm.
-- **Reads you send yourself stay small.** A few single-row reads (`?ids=<one id>`) or short paged reads (a `limit`), at most one unpaged list per session: no id-range scans, no loops. Staging throttles each user after a burst; report a backend bug with two or three ids.
+- **Every write is asked for first.** Stockroom's dev server talks to a shared backend, so a saved order or a deleted SKU is real for everyone who uses it. Before an approved write, record the row's fields and `version`. To undo it, re-read the row and send the old field values with the current `version` - the old snapshot fails with 409 - then re-read and compare `version` to confirm.
+- **Reads you send yourself stay small.** A few single-row reads (`?ids=<one id>`) or short paged reads (a `limit`), at most one unpaged list per session: no id-range scans, no loops. A shared backend reads a scan as abuse; report a backend bug with two or three ids.
 - **Stay off `/stockroom/movements/archive`.** It fetches every movement of every warehouse when it mounts.
 - **No logins.** Chrome already carries the user's session; a login screen goes back to the owner.
 - **Targeted reads.** A console pattern, the network list or one element - not a full snapshot of a `DataTable`.

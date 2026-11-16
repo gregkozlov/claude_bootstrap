@@ -37,7 +37,7 @@ If there is nothing to report, write `No Medium+ findings.` End with:
 - Not pursued: <file:line - scenario - why unlikely, or settled (decisions.md); none if empty>
 ```
 
-**Filing.** This schema is the hand-off format, not a backlog's. Whoever files these into the project's backlog rewrites each record as one item in that backlog's own item format, under the tier it earns; `Confidence` and `Evidence` are dropped, the mechanism and the recommendation stay as prose.
+**Filing.** This schema is the hand-off format, not the project's. Whoever files these into the project's list of open findings rewrites each record as one item in that list's own format, under the priority it earns; `Confidence` and `Evidence` are dropped, the mechanism and the recommendation stay as prose.
 
 Three verified High findings are worth more than fifteen speculative ones. Every finding must cite the exact lines that prove it.
 

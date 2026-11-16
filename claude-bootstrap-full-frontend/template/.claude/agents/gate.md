@@ -17,7 +17,7 @@ You have no browser: never claim behavioural or visual verification, and an impl
 
 ## Procedure
 
-1. **Establish the review base before reading anything.** Default is the working tree, bounded by the prompt's file list: `git status --porcelain` first, since `git diff` shows tracked changes only - **read every new (untracked) listed file in full**. An untracked `<SRC_DIR>/__hunt_probe*.ts` is the compile probe `hunt` writes and deletes before it finishes - never part of the change. On a branch (a worktree included) the work may already be committed: `git log --oneline <base>..HEAD` shows it, and then review `git diff <base>...HEAD` as well. State the base you used. Neither the working tree nor the branch holds a change: report that instead of PASS.
+1. **Establish the review base before reading anything.** Default is the working tree, bounded by the prompt's file list: `git status --porcelain` first, since `git diff` shows tracked changes only - **read every new (untracked) listed file in full**. An untracked `<SRC_DIR>/__hunt_probe*.ts` is the compile probe `hunt` writes and deletes before it finishes - never part of the change. On a branch (a worktree included) the work may already be committed: `git log --oneline <base>..HEAD` shows it, and then review `git diff <base>...HEAD` as well. A listed file under `.claude/` in a personal layer is outside the project's git: `git -C .claude diff` when the layer is its own repo, otherwise read it in full as new - it is a change, never "no change". State the base you used. Neither the working tree nor the branch holds a change: report that instead of PASS.
 
    **The prompt's file list is the scope**: a changed file outside it is a parallel session's - do not review or report it. No list: ask for one.
 

@@ -33,6 +33,7 @@ The triggers below are generic defaults written for a frontend. [fill] Tune them
 `<CHECK_COMMAND>` has passed (lifecycle step 5); no reviewer runs the check chain, and no leg runs a full build - a review that wants build evidence asks the main thread for it. Launch every agent without a `model:` parameter - the frontmatter is the policy. Every prompt carries:
 
 - the exact file list (untracked files named - `git diff` does not show them), never "read `git diff` yourself";
+- for a diff under `.claude/` in a personal layer, which the project's git does not see: `git -C .claude diff` when the layer is its own repo, otherwise each listed file is read in full as new;
 - the Brief in a short summary, and the step-2 consumer list (`hunt` re-greps it);
 - the deliberate decisions, each as "deliberate - here is why", never "do not flag";
 - the path `.claude/docs/decisions.md`, to grep for the changed files and identifiers - a finding an entry settles is reported as `settled (decisions.md)` under "Not pursued" unless it brings evidence the entry lacked;
@@ -48,7 +49,11 @@ Static review cannot catch wrong data-shape assumptions - scales, units, sort vo
 - the real request and response bodies of the touched surfaces, not only the rendered result;
 - value scales and units against what the UI assumes, and parameter vocabularies flipped on rows with distinct values - a declared member the backend accepts while ordering nothing shows only live;
 - reads only; anything that mutates real data needs the user's explicit approval, every time;
-- with no server listening for this tree, this lens cannot run and must not be replaced by reading the code again: the tier is **incomplete** and the owed probes are named.
+- with no server listening for this tree, this lens cannot run and must not be replaced by reading the code again: the tier is **incomplete** and the owed probes are named. With `Browser check: off` the owed probes go by name into lifecycle step 8's unverified list.
+
+## Area audit
+
+An audit of a whole area ("independent audit", no diff) is not the ladder - no tier, no `gate`. One `hunt` per disjoint path scope, its prompt opening `area <scope>` with a focus, each with its own probe number and scratch folder as in the briefing (two probe paths, so two at a time); then one `hunt` opening `refute <batch>` over the pooled findings. Only CONFIRMED findings reach the user. Procedures and formats: `.claude/docs/hunt-modes.md`.
 
 ## Adjudicate
 

@@ -16,7 +16,7 @@ This layer is the light frontend layer (`../claude-bootstrap-light-frontend`) re
 | `backend-guard.mjs` and its suite | none | new |
 | `maintain-ai-layer` | `deep`, `rules`, `init` | the same three; `init` surveys data, configuration and the deploy manifests too, and reports stale hook lists |
 | Reachability bar | one user, one tab, human speed: two sessions at once and a backend answer outside its contract are out of scope | a real caller through the service's own entry points: two requests at once, a retry, hostile input and several instances are in; a dependency outside its contract and data no code path can produce are out |
-| `CLAUDE.md` budget | 20 KB | 20 KB, about 15 of it the layer's and 5 the project's - the server rules and the server's own reachability bar take the difference, so project detail belongs in path-scoped rules |
+| `CLAUDE.md` budget | 20 KB | 20 KB, about 16 of it the layer's and 4 the project's - the server rules and the server's own reachability bar take the difference, so project detail belongs in path-scoped rules |
 
 ## What it drops, against the full layer
 

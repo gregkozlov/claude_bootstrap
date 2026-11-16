@@ -169,14 +169,16 @@ async function handleStop(payload) {
   const tail = output.trimEnd().split(/\r?\n/).slice(-TAIL_LINES).join('\n');
   if (overran) return { systemMessage: `Stop check: "${CHECK}" overran ${BUDGET_MS / 1000} s and was killed. Nothing was verified.` };
   if (code === null) return { systemMessage: `Stop check could not run:\n${tail}\nNothing was verified.` };
+  // The check may write an unignored file itself (a report, a cache): the tree it leaves is the one the next Stop sees.
+  const checked = treeKey();
   // With no tree key (no git, a git error) the failure's own output keys the block, digits masked so a duration or a
   // clock line does not make the same failure new: it blocks once, and a pass in between re-arms it.
-  const blocked = key ?? `no-git-${sha256(tail.replace(/\d+/g, '#'))}`;
+  const blocked = checked ?? `no-git-${sha256(tail.replace(/\d+/g, '#'))}`;
   if (code === 0) {
-    writeState(file, key ? { ...state, lastPassed: key } : { ...state, lastBlocked: undefined });
+    writeState(file, checked ? { ...state, lastPassed: checked } : { ...state, lastBlocked: undefined });
     return null;
   }
-  if (!key && blocked === state.lastBlocked) return null;
+  if (!checked && blocked === state.lastBlocked) return null;
   writeState(file, { ...state, lastBlocked: blocked });
   return {
     decision: 'block',

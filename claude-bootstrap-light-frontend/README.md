@@ -1,9 +1,9 @@
 # Claude Code working layer - light, for a frontend
 
-A small working layer for Claude Code in a codebase with a UI, sized for a ~20 USD plan.
+A small working layer for Claude Code in a codebase with a UI, sized for a ~20 USD plan. Terms: [Glossary](#glossary).
 
 > [!IMPORTANT]
-> Run the install in Claude Code on **Opus at high effort**: `claude --model opus --effort high` (or `/model opus`, then `/effort high`). Allow this folder too: start with `--add-dir <path to this folder>`, or run `/add-dir <path to this folder>` first. Then paste this prompt, with the path filled in:
+> Run the install in Claude Code on **Opus at high effort**: `claude --model opus --effort high` (or `/model opus`, then `/effort high`). Allow this folder too: start with `--add-dir "<path to this folder>"`, or run `/add-dir <path to this folder>` first. Then paste this prompt, with the path filled in:
 
 ```text
 Integrate the Claude Code working layer I unpacked at <path to this folder> into this project.
@@ -25,9 +25,9 @@ Integrate the Claude Code working layer I unpacked at <path to this folder> into
 ## Install
 
 1. Download this repository (Code > Download ZIP, or `git clone`) and unpack it **outside** your project. You need one folder of it: `claude-bootstrap-light-frontend`.
-2. Open Claude Code in your project as the box above says, and paste the prompt. `--add-dir` saves only the prompts for reading the bootstrap. Each copy still asks once - about 20 for this layer.
-3. The install first asks where the layer lives in git (below), then copies and fills it.
-4. When it is done, restart Claude Code and run `/maintain-ai-layer init`. It writes the project sections of the layer's `CLAUDE.md`, builds path-scoped rules from your code and tunes `hunt` to the project.
+2. Open Claude Code at the repository root of your project as the box above says, and paste the prompt. `--add-dir` saves only the prompts for reading the bootstrap. Each copy still asks once - about 20 for this layer.
+3. The install first asks where the layer lives in git (below), then asks only what the repo cannot answer - usually the check command and whether "never commit" stays.
+4. When it is done, restart Claude Code with the same flags, then run `/maintain-ai-layer init`. It writes the project sections of the layer's `CLAUDE.md`, builds path-scoped rules from your code and tunes `hunt` to the project.
 
 The same prompt updates a layer installed from an older version of this bootstrap, keeping its mode. Opus is recommended for the install and `init`; daily work runs on the model you pick, and the layer's agents on Sonnet.
 
@@ -35,8 +35,8 @@ The same prompt updates a layer installed from an older version of this bootstra
 
 | Mode | What you get |
 | --- | --- |
-| **Own repo** (recommended) | the whole layer in `.claude/`, hidden from the project's git and kept in a git repo of its own - history, a backup, and safe from `git clean` and `git stash -a`. Create a private repo and push the layer there; the install prints the commands. |
-| **Personal** | the same, without history |
+| **Personal, own repo** (recommended) | the whole layer in `.claude/`, hidden from the project's git, and `.claude/` becomes your own git repo once you run the five commands the install prints (`git init`, a first commit, a push to a private repo you create). Until then it has no history, and `git clean -x` or `git stash -a` can delete it. |
+| **Personal, no history** | the same, without the repo |
 | **Team** | committed with the project: everyone who uses Claude Code in the repo gets it |
 
 You can also describe any other arrangement in your own words. A personal layer does not follow into a new `git worktree` - for an own repo, clone it into the new tree's `.claude/`.
@@ -62,14 +62,14 @@ A bug report starts with the `debug` skill (reproduce, gather evidence, name the
 
 **In short:** a trivial edit launches no agent, a normal task 1-2 (at most 5), and the monthly upkeep about 35. That upkeep run is the largest single bill the layer asks for - start it when your usage window has room.
 
-There are two bills. **`CLAUDE.md` is paid on every turn**: the template is about 12 KB, and its budget is 20 KB (roughly 5k tokens). **An agent launch is paid once** but rebuilds its context from nothing, so it is the expensive unit. The table counts launches per task.
+There are two bills. **`CLAUDE.md` is paid on every turn**: the template is about 13 KB, and its budget is 20 KB (roughly 5k tokens). **An agent launch is paid once** but rebuilds its context from nothing, so it is the expensive unit. The table counts launches per task.
 
 | Task | Agent launches | Which |
 | --- | --- | --- |
 | Super-trivial edit (one file, obvious, low risk) | 0 | none |
 | Bounded change (known files, one surface) | usually 1, at most 4 | `hunt` on the diff; extras below |
 | Contract change (plan mode) | usually 2, at most 5 | `hunt` on the plan and on the diff; extras below |
-| Bug fix | as its class above | `debug` and the missing-rule check run in the main thread |
+| Bug fix | as its class above | `debug` and the gap check (the one rule line the bug shows no doc had) run in the main thread |
 | Any task under "no subagents" | 0 | the main thread does every step itself |
 
 The extras, each at most once: a second `hunt` round when a fix is itself non-trivial, `drift` when a doc names what changed, `Explore` when step 1 must sweep an unfamiliar area.
@@ -85,8 +85,8 @@ The extras, each at most once: a second `hunt` round when a fix is itself non-tr
 | Run | When | Launches |
 | --- | --- | --- |
 | the install | once | none - it runs in the main thread |
-| `init` | once after the install, again when the project has moved on | 4 survey agents (3 `Explore`, 1 `general-purpose`). With no rules yet, 1 `general-purpose` per area of up to ~250 source files, 1 for root config, 1 on the fix history and 1 per rule family. About 15 for a 1,000-file project. |
-| `deep` (the default) | about once a month - a session-start reminder tells you when | 1 `drift` per unit: 12 `CLAUDE.md` sections, each rule, 2 agents, 4 skills, the hooks README, each README in the source tree. Then 1 `general-purpose` per rule family, 4 for new-rule search, 2 for a workflow walk. About 35 with five rules. |
+| `init` | once after the install, again when the project has moved on | 4 survey agents (3 `Explore`, 1 `general-purpose`). With no rules yet, 1 `general-purpose` per area of up to ~250 source files, 1 for root config, 1 on the fix history and 1 per rule family (a rule and the sibling rules split off it). About 15 for a 1,000-file project. |
+| `deep` (the default once `CLAUDE.md` has no `[fill]` line left; until then a bare `/maintain-ai-layer` runs `init`) | about once a month - a session-start reminder tells you when | 1 `drift` per unit: 12 `CLAUDE.md` sections, each rule, 2 agents, 4 skills, the hooks README, each README in the source tree. Then 1 `general-purpose` per rule family, 4 for new-rule search, 2 for a workflow walk. About 35 with five rules. |
 | `rules` | when you ask | 1 `drift` per rule, 1 `general-purpose` per rule family, 4 for new-rule search |
 
 To spend less:

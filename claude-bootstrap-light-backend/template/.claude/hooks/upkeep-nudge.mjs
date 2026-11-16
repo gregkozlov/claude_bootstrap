@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Says, at session start, when the AI-layer upkeep pass is overdue. `maintain-ai-layer` writes the date of its
-// last run into the gitignored .claude/.last-maintain; nothing else reminds anyone to run it. Silent in a linked
-// worktree, since the pass runs in the main tree and a second tree would otherwise be told so forever.
+// last run into .claude/.last-maintain (committed with the layer in team mode, per machine in a personal mode);
+// nothing else reminds anyone to run it. Silent in a linked worktree, since the pass runs in the main tree and a
+// second tree would otherwise be told so forever.
 //
 // Reports, never blocks. Exits 0 whatever happens.
 import { readFile, stat } from 'node:fs/promises';

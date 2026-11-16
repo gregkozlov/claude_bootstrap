@@ -42,7 +42,7 @@ Apply each fix after measuring it yourself. A section that serves a strict subse
 - **Sections with a different audience** (R3's section map) move to a rule whose globs fit them: an existing one, or a split. The usual shape is `<name>.md` for the call sites and `<name>-internals.md` for the module's own folder. A split is made only when R3's map names files that stop loading the moved text, and the reach after it must show that.
 - **One audience, still heavy** - trim instead: true-but-dead text, a mechanic only one process step needs (to that step's skill), a second copy.
 - **The floor:** a rule that would end under ~1 KB is merged into the rule whose globs it shares.
-- The pointers to the old file are re-aimed (`grep -rn "<rule>.md" CLAUDE.md .claude`).
+- The pointers to the old file are re-aimed (`grep -rn --exclude-dir=sessions --exclude-dir=.git "<rule>.md" "$L" .claude`, `$L` as `references/deep.md` D1 sets it).
 
 A candidate `references/settled.md` already answered is logged as settled.
 

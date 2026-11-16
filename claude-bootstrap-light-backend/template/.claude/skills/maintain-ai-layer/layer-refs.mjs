@@ -6,8 +6,8 @@
 //   node .claude/skills/maintain-ai-layer/layer-refs.mjs [file-or-dir ...]
 //
 // No arguments: CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, every *.md under .claude/ on disk (sessions
-// skipped) and every tracked or unignored *.md. With arguments: only those
-// (a directory is scanned for *.md one level deep - the memory folder, say).
+// skipped) and every tracked or unignored *.md - outside a git repository the layer's own files alone.
+// With arguments: only those (a directory is scanned for *.md one level deep - the memory folder, say).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,14 +19,20 @@ const BUILT_IN_AGENTS = new Set(['Explore', 'Plan', 'general-purpose', 'claude-c
 const PREFIXES = ['<SRC_DIR>/', '.claude/'];
 const SUFFIXES = ['', '.ts', '.tsx', '.mjs', '.js', '.json', '.md', '/index.ts', '/index.tsx'];
 
-const git = (...args) => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+const git = (...args) =>
+  execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
 
 const targets = () => {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    const tracked = git('ls-files', '--cached', '--others', '--exclude-standard', '*.md')
-      .split('\n')
-      .filter((f) => f && !f.includes('node_modules/'));
+    let tracked = [];
+    try {
+      tracked = git('ls-files', '--cached', '--others', '--exclude-standard', '*.md')
+        .split('\n')
+        .filter((f) => f && !f.includes('node_modules/'));
+    } catch {
+      console.log('layer-refs: git lists no files here (no repository, or git failed) - only CLAUDE.md and the *.md under .claude/ are checked');
+    }
     // A personal install keeps .claude/ out of the project's git, so the layer is read from disk.
     const fromDisk = (dir) =>
       fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {
@@ -52,8 +58,27 @@ const targets = () => {
 const names = (dir, pick) => (fs.existsSync(dir) ? fs.readdirSync(dir).map(pick).filter(Boolean) : []);
 const skills = new Set(names(path.join(ROOT, '.claude', 'skills'), (d) => d));
 const agents = new Set(names(path.join(ROOT, '.claude', 'agents'), (f) => f.match(/^(.+)\.md$/)?.[1]));
-const manifest = path.join(ROOT, 'package.json');
-const scripts = fs.existsSync(manifest) ? new Set(Object.keys(JSON.parse(fs.readFileSync(manifest, 'utf8')).scripts ?? {})) : null;
+const manifests = new Map();
+const scriptsIn = (dir) => {
+  if (!manifests.has(dir)) {
+    let found = null;
+    try {
+      found = Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).scripts ?? {});
+    } catch {
+      // No package.json in this folder, or one that does not parse.
+    }
+    manifests.set(dir, found);
+  }
+  return manifests.get(dir);
+};
+// `npm run x` is held to the nearest package.json at or above the file, then to the ones above it up to the root: a
+// workspace's doc names its own package's scripts and the root's. A file outside the repo is held to the root's.
+const scriptsFor = (file) => {
+  const rel = path.relative(ROOT, path.dirname(file));
+  const parts = rel.startsWith('..') || path.isAbsolute(rel) ? [] : rel.split(path.sep).filter(Boolean);
+  const found = [ROOT, ...parts.map((_, i) => path.join(ROOT, ...parts.slice(0, i + 1)))].map(scriptsIn).filter(Boolean);
+  return found.length ? new Set(found.flat()) : null;
+};
 
 const onDisk = (ref) => SUFFIXES.some((suffix) => fs.existsSync(path.join(ROOT, ref.replace(/\/$/, '') + suffix)));
 // A gitignored path (a session folder, settings.local.json, a waiver) exists per machine or per run, not in the repo.
@@ -86,6 +111,7 @@ const files = targets();
 for (const file of files) {
   const rel = path.relative(ROOT, file).split(path.sep).join('/');
   const problems = [];
+  const scripts = scriptsFor(file);
   fs.readFileSync(file, 'utf8')
     .split(/\r?\n/)
     .forEach((line, i) => {

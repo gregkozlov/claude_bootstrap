@@ -13,7 +13,8 @@ import { resolve, sep } from 'node:path';
 
 const [PORT_FROM, PORT_TO] = '<DEV_PORT_RANGE>'.split('-').map(Number);
 const BASE_PATH = '<DEV_BASE_PATH>';
-const TREE_FROM_COMMAND = /([A-Za-z]:[^"]*?|(?<=^|[\s"'])\/[^\s"']*?)[\\/]node_modules[\\/]/;
+// A quoted Windows path may hold spaces; an unquoted one stops at a space, so a bare node.exe path is not glued onto the tree.
+const TREE_FROM_COMMAND = /(?:"([A-Za-z]:[^"]*?)|(?<=^|\s)([A-Za-z]:[^\s"]*?)|(?<=^|[\s"'])(\/[^\s"']*?))[\\/]node_modules[\\/]/;
 
 const PS = [
   '$ErrorActionPreference = "SilentlyContinue"',
@@ -95,7 +96,7 @@ const here = resolve(execFileSync('git', ['rev-parse', '--show-toplevel'], { enc
 const rows = (process.platform === 'win32' ? windowsListeners() : posixListeners())
   .map(({ port, address, pid, command }) => {
     const match = command.match(TREE_FROM_COMMAND);
-    const tree = match ? resolve(match[1]) : null;
+    const tree = match ? resolve(match[1] ?? match[2] ?? match[3]) : null;
     let branch = '';
     if (tree) {
       try {
