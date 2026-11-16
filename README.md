@@ -15,9 +15,6 @@ Three ready-made working layers for [Claude Code](https://code.claude.com/docs):
 | A web UI, on a small allowance (Pro, a standard team seat) | [`claude-bootstrap-light-frontend`](claude-bootstrap-light-frontend/README.md) |
 | A service, an API or a worker, in any language | [`claude-bootstrap-light-backend`](claude-bootstrap-light-backend/README.md) |
 | A web UI, on a large allowance (Max, a premium team seat), where review depth matters more than tokens | [`claude-bootstrap-full-frontend`](claude-bootstrap-full-frontend/README.md) |
-| A UI and a server in one repo | the one that matches where the risk is - one layer per repo, never two |
-| A mobile or desktop app | not designed for; [`claude-bootstrap-light-frontend`](claude-bootstrap-light-frontend/README.md) is the closest fit - `init` adjusts its reachability bar to your UI |
-| A library, a CLI, a data or infra repo | not designed for; [`claude-bootstrap-light-backend`](claude-bootstrap-light-backend/README.md) is the closest fit - after `init`, rewrite its reachability bar's entry points (endpoint, consumer, job) to your public API or commands |
 
 ## How they differ
 
