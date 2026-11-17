@@ -11,7 +11,11 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const guard = join(here, '..', 'guard.mjs');
 const root = resolve(here, '..', '..', '..');
-const S = 'C:/Users/x/AppData/Local/Temp/claude/x/scratchpad';
+// Paths outside any project, spelled as this platform spells them: a drive-letter path reads as relative on POSIX.
+const WIN = process.platform === 'win32';
+const home = WIN ? 'C:/Users/x' : '/home/x';
+const temp = WIN ? `${home}/AppData/Local/Temp` : '/tmp';
+const S = `${temp}/claude/x/scratchpad`;
 // A backslash, built here so no shell or editor mangles the alternation it goes into.
 const BS = String.fromCharCode(92);
 const rootPath = root.split(BS).join('/');
@@ -72,7 +76,7 @@ const cases = [
   ['git branch --format (allow)', 0, 'git branch --format=%(refname)'],
   ['node -e writing a repo file (deny)', 2, `node -e "require('fs').writeFileSync('<SRC_DIR>/x.ts', 'a')"`],
   ['node -e writing a computed path (deny)', 2, `node -e "fs.writeFileSync(path.join(root, 'a.ts'), body)"`],
-  ['node -e writing to Temp (allow)', 0, `node -e "require('fs').writeFileSync('C:/Users/x/AppData/Local/Temp/a.json', 'a')"`],
+  ['node -e writing to Temp (allow)', 0, `node -e "require('fs').writeFileSync('${temp}/a.json', 'a')"`],
   // read git that runs a program or writes a file, judged on the words git receives
   ['git grep -O runs a program (deny)', 2, 'git grep -Ocat x'],
   ['git grep -O in a cluster (deny)', 2, 'git grep -nOcat x'],
@@ -130,7 +134,7 @@ const cases = [
   ['heredoc to repo (deny)', 2, "cat > .claude/scripts/x.mjs <<'EOF'\nconsole.log(1)\nEOF"],
   ['heredoc to scratchpad var (allow)', 0, `cat > "$S/probe.mjs" <<'EOF'\nconsole.log(1)\nEOF`],
   ['heredoc to Temp path (allow)', 0, `cat > "${S}/probe.mjs" <<'EOF'\nconsole.log(1)\nEOF`],
-  ['append to file outside repo (allow)', 0, 'cat >> "C:/Users/x/.claude/projects/x/memory/a.md" <<EOF\nx\nEOF'],
+  ['append to file outside repo (allow)', 0, `cat >> "${home}/.claude/projects/x/memory/a.md" <<EOF\nx\nEOF`],
   ['redirect to /dev/null (allow)', 0, 'curl -s -o /dev/null -w "%{http_code}" http://localhost:5173/ 2>/dev/null'],
   ['stderr to stdout + pipe (allow)', 0, 'node x.mjs 2>&1 | head -3'],
   ['tee to repo (deny)', 2, 'echo x | tee src/a.ts'],
@@ -163,10 +167,10 @@ const cases = [
   ...(drive ? [['rm -rf a bare drive (deny)', 2, `rm -rf /${drive}`]] : []),
   ...(firstDir && !/\s/.test(firstDir) ? [['find -delete under an ancestor (deny)', 2, `find ${drive ? `/${drive}` : ''}/${firstDir} -name '*.ts' -delete`]] : []),
   ...(/\s/.test(parentPath) || dirname(root) === root ? [] : [['redirect to a sibling of the project (allow)', 0, `echo x > ${parentPath}/out.json`]]),
-  // A glob is judged by the directory it expands in; a `\\?\` long-path prefix is not a glob.
+  // A glob is judged by the directory it expands in; a `\\?\` long-path prefix (Windows only) is not a glob.
   ...(/\s/.test(parentPath) || dirname(root) === root ? [] : [['rm -rf a glob in the parent of the project (deny)', 2, `rm -rf ${parentPath}/*`]]),
   ['rm -f a glob in /tmp (allow)', 0, 'rm -f /tmp/*.log'],
-  ['redirect to a long-path scratch file (allow, PowerShell)', 0, 'node x.mjs > \\\\?\\C:\\Windows\\Temp\\x.txt'],
+  ...(WIN ? [['redirect to a long-path scratch file (allow, PowerShell)', 0, 'node x.mjs > \\\\?\\C:\\Windows\\Temp\\x.txt']] : []),
   ['gh api GET with fields (allow)', 0, 'gh api --method GET search/issues -f q=x'],
   ['gh api DELETE (deny)', 2, 'gh api -XDELETE repos/x/y'],
   ['find -delete in the tree (deny)', 2, 'find <SRC_DIR> -name "*.tmp" -delete'],

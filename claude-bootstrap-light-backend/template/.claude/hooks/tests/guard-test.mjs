@@ -1,5 +1,5 @@
-// Self-test for guard.mjs, Edit / Write / MultiEdit / NotebookEdit payloads. Paths use Windows backslashes and the
-// texts carry real dashes, built here so no shell mangles them. Run from anywhere:
+// Self-test for guard.mjs, Edit / Write / MultiEdit / NotebookEdit payloads. Paths use the platform's separator and
+// the texts carry real dashes, built here so no shell mangles them. Run from anywhere:
 //   node .claude/hooks/tests/guard-test.mjs
 // Every line must read "ok". Add a case per pattern in PROTECTED_PATHS (see the two marked below).
 import { spawnSync } from 'node:child_process';
@@ -14,7 +14,11 @@ const root = resolve(here, '..', '..', '..');
 const BS = String.fromCharCode(92);
 const EM = String.fromCharCode(0x2014);
 const EN = String.fromCharCode(0x2013);
-const inRoot = (...parts) => [root, ...parts].join(BS);
+const inRoot = (...parts) => join(root, ...parts);
+// Paths outside any project, spelled as this platform spells them: a drive-letter path reads as relative on POSIX.
+const WIN = process.platform === 'win32';
+const home = WIN ? ['C:', 'Users', 'x'].join(BS) : '/home/x';
+const temp = WIN ? join(home, 'AppData', 'Local', 'Temp') : '/tmp';
 
 // Copies of the guard with a known protected list, in the OS temp dir: one well filled, one misfilled.
 const source = readFileSync(guard, 'utf8');
@@ -41,12 +45,12 @@ const cases = [
   ['MultiEdit en dash (deny)', 2, { tool_name: 'MultiEdit', tool_input: { file_path: inRoot('src', 'App.ts'), edits: [{ old_string: 'a', new_string: `b ${EN} c` }] }, cwd: root }],
   ['NotebookEdit em dash (deny)', 2, { tool_name: 'NotebookEdit', tool_input: { notebook_path: inRoot('a.ipynb'), new_source: `a ${EM} b` }, cwd: root }],
   ['Edit spelling the rule (allow)', 0, { tool_name: 'Edit', tool_input: { file_path: inRoot('CLAUDE.md'), new_string: `plain hyphen, never ${EM}` }, cwd: root }],
-  ['Write outside project with dash (allow)', 0, { tool_name: 'Write', tool_input: { file_path: ['C:', 'Users', 'x', 'memory', 'a.md'].join(BS), content: `a ${EM} b` }, cwd: root }],
+  ['Write outside project with dash (allow)', 0, { tool_name: 'Write', tool_input: { file_path: join(home, 'memory', 'a.md'), content: `a ${EM} b` }, cwd: root }],
   // The write fence: a payload naming a fenced agent may write only that agent's paths inside the project.
   ['hunt Write of its probe (allow)', 0, { tool_name: 'Write', agent_type: 'hunt', tool_input: { file_path: inRoot('<SRC_DIR>', '__hunt_probe.ts'), content: 'x' }, cwd: root }],
   ['hunt Edit of a source file (deny)', 2, { tool_name: 'Edit', agent_type: 'hunt', tool_input: { file_path: inRoot('<SRC_DIR>', 'App.ts'), new_string: 'x' }, cwd: root }],
   ['hunt NotebookEdit of a source notebook (deny)', 2, { tool_name: 'NotebookEdit', agent_type: 'hunt', tool_input: { notebook_path: inRoot('<SRC_DIR>', 'a.ipynb'), new_source: 'x' }, cwd: root }],
-  ['hunt Write outside the project (allow)', 0, { tool_name: 'Write', agent_type: 'hunt', tool_input: { file_path: ['C:', 'Users', 'x', 'AppData', 'Local', 'Temp', 'p.json'].join(BS), content: 'x' }, cwd: root }],
+  ['hunt Write outside the project (allow)', 0, { tool_name: 'Write', agent_type: 'hunt', tool_input: { file_path: join(temp, 'p.json'), content: 'x' }, cwd: root }],
   // PROTECTED_PATHS - replace these two with the project's own patterns; with an empty list both are "allow".
   // ['Edit generated client (deny)', 2, { tool_name: 'Edit', tool_input: { file_path: inRoot('src', 'api', 'generated', 'client.ts'), new_string: 'x' }, cwd: root }],
   // ['Edit schema (deny)', 2, { tool_name: 'Edit', tool_input: { file_path: inRoot('schemas', 'api.openapi.json'), new_string: 'x' }, cwd: root }],
