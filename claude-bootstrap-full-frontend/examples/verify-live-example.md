@@ -22,7 +22,7 @@ The port and the Chrome are settled by facts, never by convention or by what a p
 - **Stay off `/stockroom/movements/archive`.** It fetches every movement of every warehouse when it mounts.
 - **No logins.** Chrome already carries the user's session; a login screen goes back to the owner.
 - **Targeted reads.** A console pattern, the network list or one element - not a full snapshot of a `DataTable`.
-- **Arm both readers first.** `read_console_messages` and `read_network_requests` record only from their first call and report "none found" for anything earlier, which looks exactly like a clean run. Call each once on the `/__tree` page in step 3 (a fresh `chrome://` tab rejects them), before opening the surface. A "none found" right after a navigation is re-taken, and an empty console counts only next to a positive control on the same page (`\[vite\] connected`).
+- **Arm the network reader first.** `read_network_requests` records only from its first call and reports "none found" for anything earlier, which looks exactly like an idle page. Call it once on the `/__tree` page in step 3 (a fresh `chrome://` tab rejects it), before opening the surface; a "none found" right after a navigation is re-taken. `read_console_messages` needs no arming - its first call returns everything since the page loaded - but an empty console counts only next to a positive control on the same page (`\[vite\] connected`).
 - **Module loading is read from the page**, not from `read_network_requests`, which listed no module scripts on a full load: use `performance.getEntriesByType('resource')` filtered by the path, after a full navigation.
 
 ## 1. Which tree am I
@@ -52,7 +52,7 @@ It answers `{"host","tree","branch","port"}` from the vite process itself. `host
 ## 3. Which Chrome - proved, not assumed
 
 1. `tabs_context_mcp` first; create a tab rather than reusing one from another session.
-2. `navigate` to `http://localhost:<port>/stockroom/__tree`, read the page text, then call `read_console_messages` and `read_network_requests` once each.
+2. `navigate` to `http://localhost:<port>/stockroom/__tree`, read the page text, then call `read_network_requests` once to start its recording.
    - The same JSON as in step 2: this Chrome is on this machine and sees this server.
    - An error page (`Frame with ID 0 is showing error page`) or JSON with a **different `host`**: the paired Chrome is another machine's. Call `switch_browser` once, telling the owner to click Connect in the Chrome **on this machine**, then repeat from 3.1 in the browser that connected. If it offers no browser or the owner does not connect, stop and ask them to step in, as the prohibitions say.
 3. State the triple in the reply before any other browser action: `Verifying on port <N>, host <hostname>, tree <root> (<branch>)`.
