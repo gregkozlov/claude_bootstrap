@@ -14,7 +14,7 @@ The run applies what it verified, like `deep`. Reach is measured as `SKILL.md` "
 
 ## R1. Baseline
 
-`references/deep.md` M1 and M2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source directory: the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
+`references/deep.md` M1 and M2. Then the inventory into the run file - per rule: its bytes, its `##` headings, its globs and its reach - and the union of all reaches against `git ls-files --cached --others --exclude-standard` of the source folders (`CLAUDE.md` Folder conventions lists them): the **unreached folders**, where no rule loads at all. Then the **heaviest files**: for the most-read folders, the summed bytes of every rule that reaches a file there.
 
 **No project rule** - no `.claude/rules/*.md`, or none whose reach holds a file outside `.claude/` - sends the run to R7; R2-R5 have nothing to work on.
 
@@ -48,7 +48,7 @@ A candidate `references/settled.md` already answered is logged as settled.
 
 ## R5. Rules the code needs
 
-Cut the source directory into three areas of roughly equal file count by top-level folder (`git ls-files <source dir> | cut -d/ -f1-2 | sort | uniq -c`), generated code left out. Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), one per area, each told the unreached folders in its area first; and one `general-purpose` on the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only -- <source dir>` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared component, returned with the commits.
+Cut the source folders into three areas of roughly equal file count by top-level folder (`git ls-files <source folders> | cut -d/ -f1-2 | sort | uniq -c`), generated code left out. Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), one per area, each told the unreached folders in its area first; and one `general-purpose` on the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared component, returned with the commits. The fourth is not launched when the caller already holds a fix-history answer (`init`'s I1): that answer stands in for it.
 
 Each prompt lists the layer files and asks for:
 
@@ -73,7 +73,7 @@ The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c` 
 ## R7. No project rule: build the set
 
 1. **Survey.** `git ls-files` per top-level folder with counts, the stack from the package manifest, and the `CLAUDE.md` sections. Cut the code into areas of at most ~250 source files (a large folder by its subfolders), plus one for the root config files.
-2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind - the move that keeps `CLAUDE.md` inside its budget.
+2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent - none when the caller already holds a fix-history answer (`init`'s I1), which the candidates get instead. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind - the move that keeps `CLAUDE.md` inside its budget.
 3. **Filter** by R5's five conditions.
 4. **Cluster by audience:** one rule per set of files that needs the same text, named by its subject; R4's floor and split shape hold from the first draft.
 5. **Write** each rule by "Writing a rule", and measure its reach.

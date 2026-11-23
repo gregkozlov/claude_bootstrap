@@ -3,7 +3,7 @@ name: drift
 description: Read-only doc-drift checker. Lifecycle step 5 in `diff` mode when a doc names what the diff changed; `section <name>` from `maintain-ai-layer` or when the user asks to fact-check a doc. Never edits; the main thread checks and applies its replacements.
 tools: Glob, Grep, Read, Bash
 model: sonnet
-effort: medium
+effort: high
 color: yellow
 ---
 

@@ -30,7 +30,7 @@ Not covered: an indentation mix a YAML parser rejects, which makes the loader ig
 
 **The modes.**
 
-- No flag: the rule bytes a Read of each `<SRC_DIR>/` source file pulls in (median, top decile, max, files over 30 and 20 KB), the heaviest files, and each rule's size, reach and `<SRC_DIR>/` globs matching nothing. Past ~30 KB of rules per file read, the globs overlap and need splitting by what the reader of that file needs.
+- No flag: the rule bytes a Read of each tracked source file pulls in, in every source folder outside `.claude/` (median, top decile, max, files over 30 and 20 KB), the heaviest files, and each rule's size, reach and globs matching no tracked file. Past ~30 KB of rules per file read, the globs overlap and need splitting by what the reader of that file needs.
 - `--files <rule>`: every path the rule's globs match, `.claude/` included, one per line. `SHAPE` and `FAIL` lines go to stderr, so `| wc -l` counts paths alone; a name may carry its `.md`, and an unknown rule is a `FAIL` and exit 1.
 - `--check`: the shape check, and a `FAIL` for each rule over the 20 KiB budget, measured on LF bytes; either exits 1. With no `.claude/rules/` folder it checks an empty set and passes.
 
@@ -49,7 +49,7 @@ First, what exists:
 - **No `rules-reach.mjs`**: stop and say so. A rule set nobody can measure is not built by hand.
 - **No `.claude/rules/` folder**: go to R7 after the `references/deep.md` M1 commands; the report and `--check` run on an empty set.
 
-Then `references/deep.md` M1 and M2, and the inventory into the task file - per rule: its bytes, its `##` headings, its globs and its reach (`node .claude/scripts/rules-reach.mjs --files <rule> | wc -l`, every file kind; the report's "Files" column counts `<SRC_DIR>/` code only) - and the union of all reach lists against `git ls-files --cached --others --exclude-standard <SRC_DIR>`: the **unreached folders**, where no rule loads at all.
+Then `references/deep.md` M1 and M2, and the inventory into the task file - per rule: its bytes, its `##` headings, its globs and its reach (`node .claude/scripts/rules-reach.mjs --files <rule> | wc -l`, every file kind; the report's "Files" column counts source code outside `.claude/` only) - and the union of all reach lists against `git ls-files --cached --others --exclude-standard` over every source folder: the **unreached folders**, where no rule loads at all.
 
 **No project rule** - no rule whose reach holds a file outside `.claude/` - sends the run to R7; R2-R5 have nothing to work on.
 
@@ -83,11 +83,11 @@ A candidate `settled.md` already answered is logged as settled.
 
 ## R5. Rules the code needs
 
-Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), each over one area of `<SRC_DIR>/`:
+Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), each over one area of the source - `<SRC_DIR>/` and every other source folder:
 
-[fill] Split `<SRC_DIR>/` into three areas of roughly equal size by top-level folder - for example (a) the shared components, utilities, constants and state, (b) the pages or screens, (c) everything else except generated code - and list them here as (a), (b), (c).
+[fill] Split the source into three areas of roughly equal size by top-level folder - for example (a) the shared components, utilities, constants and state, (b) the pages or screens, (c) everything else except generated code - and list them here as (a), (b), (c).
 
-Each is told the unreached folders in its area first. The fourth, a `general-purpose`, reads the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only -- <SRC_DIR>` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared component, returned with the commits.
+Each is told the unreached folders in its area first. The fourth, a `general-purpose`, reads the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared component, returned with the commits. The fourth is not launched when the caller already holds a fix-history answer (`init`'s I1): that answer stands in for it.
 
 Each prompt lists the layer files and asks for:
 
@@ -112,7 +112,7 @@ It lands as a line or a paragraph in the rule whose `paths:` reach those files, 
 ## R7. No project rule: build the set
 
 1. **Survey.** `git ls-files` per top-level folder with counts, the stack from the package manifest, and the `CLAUDE.md` sections. Cut the code into areas of at most ~250 source files (a large folder by its subfolders), plus one for the root config files.
-2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind.
+2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent - none when the caller already holds a fix-history answer (`init`'s I1), which the candidates get instead. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind.
 3. **Filter** by R5's five conditions.
 4. **Cluster by audience:** one rule per set of files that needs the same text, named by its subject; R4's floor and split shape hold from the first draft.
 5. **Write** each rule by "Adding a rule" above, then `--check`.

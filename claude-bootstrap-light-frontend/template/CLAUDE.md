@@ -90,7 +90,7 @@ Skills, loaded when their moment comes, never recalled: `debug` (a bug report), 
 
 ## Code Style
 
-[fill] Only what a linter does not enforce, and the linter settings that surprise (a warning that fails the build, a ban with no visible reason). The formatter runs through a commit hook or the project's own script (`npm run format`) - `guard` refuses the bare binary writing in place (`prettier --write`, `eslint --fix`): with no script, format with Edit and name the command for the owner.
+[fill] Only what a linter does not enforce, and the linter settings that surprise (a warning that fails the build, a ban with no visible reason). The formatter runs through a commit hook or the project's own script (a `format` package script, say) - `guard` refuses the bare binary writing in place (`prettier --write`, `eslint --fix`): with no script, format with Edit and name the command for the owner.
 
 ### Comments - the default is none
 

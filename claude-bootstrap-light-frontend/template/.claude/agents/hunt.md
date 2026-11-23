@@ -3,7 +3,7 @@ name: hunt
 description: Adversarial runtime-defect hunter - every finding a concrete failure scenario traced through the real implementation the change consumes. Reviews a plan before it is approved (lifecycle step 2b) and the diff after it is written (step 4). Read-only; never edits.
 tools: Glob, Grep, Read, Bash
 model: sonnet
-effort: medium
+effort: high
 color: pink
 ---
 

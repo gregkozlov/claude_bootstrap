@@ -34,7 +34,7 @@ An edit to one of these is made in every copy, and `cmp` proves it. Paths are un
 | `rules-reach.mjs`, `dev-servers.mjs`, `run-pure.mjs`, `verify-live` | project-specific machinery; `maintain-ai-layer` measures a rule's reach with `git ls-files` instead, with no glob-shape check |
 | A browser check | the dev server is the user's; `debug` takes the user's screenshot, console or network paste as the observation |
 | `maintain-ai-layer`'s session-folder record and `crosscheck` review | a run keeps its findings in a scratchpad file and runs `handoff` when it may outlive the session; hooks and settings are reported, never edited |
-| `drift`'s `decisions.md`, its `opus` / `high` default | light has no such file - a settled decision lives in `CLAUDE.md` Architecture; `sonnet` at medium effort is enough for claim-by-claim checks |
+| `drift`'s `decisions.md`, its `opus` / `high` default | light has no such file - a settled decision lives in `CLAUDE.md` Architecture; `sonnet` at high effort is enough for claim-by-claim checks |
 | `drift`'s gap check | the main thread runs it after a bug fix by the five conditions in `drift.md` "Gaps", so a fix with no doc hit launches nothing |
 | `.claude/docs/decisions.md` | a decision a reviewer would re-file goes into `CLAUDE.md` Architecture as settled and deliberate, which `hunt` reads anyway |
 | Probe compiling in the reviewer | it needs per-project build config, allow-listed probe paths and a scratchpad project; the reviewer reads and reasons instead |

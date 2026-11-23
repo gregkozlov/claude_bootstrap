@@ -29,7 +29,7 @@ Integrate the Claude Code working layer I unpacked at <path to this folder> into
 3. The install first asks where the layer lives in git (below), then asks only what the repo cannot answer - usually the check command and whether "never commit" and the local-only rules stay.
 4. When it is done, restart Claude Code with the same flags, then run `/maintain-ai-layer init`. It writes the project sections of `CLAUDE.md`, builds the path-scoped rules from your code and tunes `hunt` to the project.
 
-The same prompt updates a layer installed from an older version. Neither the install nor `init` starts your service, applies a migration or reads an env file. Each runs your check command once, and only when the database or containers it needs are already up. One layer per repo: a repo with both a server and a UI takes the layer that matches where the risk is.
+The same prompt updates a layer installed from an older version. Opus is recommended for the install and `init` only - two long procedures run once, where a step skipped costs every later session; daily work runs on the model you pick, and the layer's agents on Sonnet. On a Pro plan, start `init` when your usage window has room: it launches a dozen agents or more (the upkeep table below). Neither the install nor `init` starts your service, applies a migration or reads an env file. Each runs your check command once, and only when the database or containers it needs are already up. One layer per repo: a repo with both a server and a UI takes the layer that matches where the risk is.
 
 **Where the layer lives:**
 
@@ -68,16 +68,16 @@ You can also describe any other arrangement in your own words. A personal layer 
 
 | Agent | Model and effort | Where it is set |
 | --- | --- | --- |
-| `hunt` | `sonnet`, medium | its frontmatter in `.claude/agents/hunt.md` |
-| `drift` | `sonnet`, medium | its frontmatter in `.claude/agents/drift.md` |
+| `hunt` | `sonnet`, high | its frontmatter in `.claude/agents/hunt.md` |
+| `drift` | `sonnet`, high | its frontmatter in `.claude/agents/drift.md` |
 | `Explore` in a task | Claude Code's built-in default | - |
-| every agent `maintain-ai-layer` launches | `sonnet` (`drift` keeps its own effort) | `maintain-ai-layer/SKILL.md` |
+| every agent `maintain-ai-layer` launches | `sonnet`, high | `maintain-ai-layer/SKILL.md` |
 
 | Upkeep | When | Agent launches |
 | --- | --- | --- |
-| `/maintain-ai-layer init` | once after the install, and when the project has moved on | 5 survey agents (4 `Explore`, 1 `general-purpose`); then, with no rule yet, one `general-purpose` per area of about 250 source files, one for the migrations and schema files, one for the root config files and one on the fix history, and one per new rule family (a rule and the sibling rules split off it) to check its reach |
+| `/maintain-ai-layer init` | once after the install, and when the project has moved on | 5 survey agents (4 `Explore`, 1 `general-purpose` on the fix history); then, with no rule yet, one `general-purpose` per area of about 250 source files, one for the migrations and schema files and one for the root config files, and one per new rule family (a rule and the sibling rules split off it) to check its reach |
 | `/maintain-ai-layer deep` - also what a bare `/maintain-ai-layer` runs once `CLAUDE.md` has no `[fill]` line left; until then it runs `init` | about once a month, when the reminder says so | one `drift` per unit (each `CLAUDE.md` section, rule, agent, skill, the hooks README, each source-folder README), the `rules` steps (next row), and 2 `general-purpose` walkers - dozens in all |
-| `/maintain-ai-layer rules` | on request | one `drift` per rule, one `general-purpose` per rule family, and 4 more (3 `Explore`, 1 `general-purpose`) for new rules; with no rule yet, the `init` build above |
+| `/maintain-ai-layer rules` | on request | one `drift` per rule, one `general-purpose` per rule family, and 4 more (3 `Explore`, 1 `general-purpose`) for new rules; with no rule yet, the `init` build above plus 1 `general-purpose` on the fix history |
 
 To spend less: say "no subagents" for a task - the main thread then carries the review and docs obligations itself. To spend more on a risky change, raise `model:` or `effort:` in `.claude/agents/hunt.md`. Do not run `Workflow` or ultracode here: they spawn agents by the dozen.
 
@@ -85,13 +85,13 @@ To spend less: say "no subagents" for a task - the main thread then carries the 
 
 > [!TIP]
 > - **A refusal** reads `Blocked by .claude/hooks/<hook>.mjs: ...`. It names the rule and the form that works, and Claude usually retries in that form by itself.
-> - **A question** comes from `backend-guard` before a command that wipes data, prints a secret from a cluster or a cloud secret store, or reaches another host. It arrives as a permission prompt, in auto mode too. Approve it only if you asked for exactly that command.
+> - **A question** comes from `backend-guard` before a command that wipes data (a rollback past one step included), rewrites the migration history, prints a secret from a cluster or a cloud secret store, or reaches another host - a shell, a tunnel, a database client. It arrives as a permission prompt, in auto mode too. Approve it only if you asked for exactly that command.
 > - **A command that is yours to run** - a deploy, a migration on staging, a push - you run yourself: type `! <command>` in the Claude Code prompt.
 > - **To switch a rule off** for good, `.claude/hooks/README.md` "Switching a rule off" names every place it lives. The hyphen rule has no switch.
 
 ## What the guards cannot do
 
-`backend-guard.mjs` reads the text of one call. It does not see a script file or a task-runner target that runs a forbidden command, SQL in a file handed to a database client, or a secret printed from the process environment. It cannot tell which database a connection string points at, and its deploy list is closed: a tool it does not name goes into the project's forbidden list at install. Its lists err on the strict side - an env file with no secret in it is refused until its pattern is narrowed. The rules in `CLAUDE.md` cover what the hook cannot see. The strongest protection is outside the layer: keep credentials for shared environments off the machine the agent works on.
+`backend-guard.mjs` reads the text of one call. It does not see a script file or a task-runner target that runs a forbidden command, SQL in a file handed to a database client, or a secret printed from the process environment. It reads a database host only from the command's own words (a host option, a connection URL), never from an env file or a config, and its deploy list is closed: a tool it does not name goes into the project's forbidden list at install. Its lists err on the strict side - an env file with no secret in it is refused until its pattern is narrowed. The rules in `CLAUDE.md` cover what the hook cannot see. The strongest protection is outside the layer: keep credentials for shared environments off the machine the agent works on.
 
 ## What is in it
 
@@ -101,7 +101,7 @@ To spend less: say "no subagents" for a task - the main thread then carries the 
 - **The reachability bar** (`CLAUDE.md`, Working Principles): a defect counts only when a real caller reaches it through an endpoint, a consumer or a job, and every finding names that path. Two requests at once, a retry, a redelivery, hostile input, a restart mid-write and several instances of the service are always in scope. A dependency answering outside its contract and data no code path can produce are out.
 - **One reviewer**, the `hunt` subagent: runtime defects only, each a concrete request or state traced through the real code the change calls. Its attack angles are a server's - input, authorization and tenancy, transactions and concurrency, stored data, queries and load, partial failure, numbers and time, contracts with callers. The project feeds it with its own bugs.
 - **One doc checker**, the `drift` subagent: it re-checks every doc claim a changed identifier touches and returns exact `replace:` / `with:` pairs. After a bug fix the main thread runs its gap check itself, to propose the one rule line no doc had.
-- **Two guard hooks**, local and free of tokens. `guard.mjs` refuses git commands that commit, push or discard work, shell writes into the tree, broad deletes, `cd` outside a subshell, edits of generated files and dash characters. `backend-guard.mjs` refuses reading a secret file, editing a frozen migration and any command that deploys or publishes. It **asks you** before a command that wipes data, prints a secret from a cluster or a cloud secret store, or opens a shell on another host. `.claude/hooks/README.md` has the full lists.
+- **Two guard hooks**, local and free of tokens. `guard.mjs` refuses git commands that commit, push or discard work, shell writes into the tree, broad deletes, `cd` outside a subshell, edits of generated files and dash characters. `backend-guard.mjs` refuses reading a secret file, editing a frozen migration and any command that deploys or publishes. It **asks you** before a command that wipes data (a rollback past one step included), rewrites the migration history, prints a secret from a cluster or a cloud secret store, or reaches another host - a shell, a tunnel, a database client. `.claude/hooks/README.md` has the full lists.
 - **One reminder**, `upkeep-nudge.mjs`: at session start, once the last upkeep pass is 30 days old, Claude tells you in one line that `/maintain-ai-layer` is due.
 - **Four skills.** `debug` finds the root cause before any fix, reproduces it locally and names the data the bug already damaged. `handoff` writes `.claude/handoff.md` for a `/compact` or a new session. `retro` runs only from its slash command. `maintain-ai-layer` keeps the layer true to the code: `deep` monthly, `rules` and `init` on request.
 

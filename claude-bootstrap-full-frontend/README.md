@@ -49,7 +49,7 @@ You can also describe any other arrangement in your own words. A personal layer 
 
 Left to you after `init`:
 
-- **The marker endpoint** the browser check reads, so it can prove which dev server it is looking at. `examples/tree-marker-plugin.ts` is the Vite version. It is a source change, so no model writes it unasked; switch `Browser check:` in the layer's `CLAUDE.md` to `on` once it answers.
+- **The marker endpoint** the browser check reads, so it can prove which dev server it is looking at. `examples/tree-marker-plugin.ts` is the Vite version, `examples/tree-marker-next-route.ts` the Next.js App Router one; another dev server needs a middleware hook to serve it, and one without (Angular CLI's `ng serve`) keeps the browser check off - as does a Next.js static export (`output: 'export'`), which builds no such route. The check expects the app at the repository root: a dev server run from a package folder of a monorepo reports that folder, not the root, and fails the comparison. It is a source change, so no model writes it unasked; switch `Browser check:` in the layer's `CLAUDE.md` to `on` once it answers.
 - **Feeding `hunt.md`** the bugs that surface after a review. `examples/hunt-example.md` shows what a fed list of attack angles looks like.
 
 ## What a task looks like
@@ -85,14 +85,14 @@ A second round runs only when a fix changed logic beyond what a reviewer prescri
 | --- | --- | --- |
 | `gate`, `hunt`, `twins`, `drift` | Opus | high |
 | `comments` | Sonnet | high |
-| `Explore`, `general-purpose` | Claude Code's built-in default | built-in default |
+| `Explore`, `general-purpose` | Claude Code's built-in default in a task; Sonnet in upkeep | built-in default in a task; high in upkeep |
 
-`/maintain-ai-layer` runs every agent it launches on Sonnet:
+`/maintain-ai-layer` runs every agent it launches on Sonnet at high effort:
 
 | Mode | Launches |
 | --- | --- |
-| `init`, first run | 4 survey agents; then one per code area of up to ~250 source files, one for the root config files and one reading the fix history; then one per new rule family (a rule and the sibling rules split off it) |
-| `init`, later runs | 4 survey agents; one `drift` per rule; one per rule family; 4 looking for rules the code needs |
+| `init`, first run | 4 survey agents, one of them reading the fix history; then one per code area of up to ~250 source files and one for the root config files; then one per new rule family (a rule and the sibling rules split off it) |
+| `init`, later runs | 4 survey agents; one `drift` per rule; one per rule family; 3 looking for rules the code needs (the survey's fix history serves them) |
 | `deep` (monthly) | 1 count check; one `drift` per unit (each `CLAUDE.md` section, rule, agent, skill and doc), eight at a time; one per rule family; 4 looking for rules; 2 walking whole tasks |
 
 ## When a hook stops you
@@ -126,7 +126,7 @@ Each case line reads `ok` and each suite ends with `N passed, 0 failed`.
 - Upkeep reminder: `node .claude/hooks/tests/upkeep-nudge-test.mjs`.
 - Rule reach: `node .claude/scripts/rules-reach.mjs --check` ends with `0 over budget, 0 rule shape problems`.
 - References: `node .claude/skills/maintain-ai-layer/layer-refs.mjs` - every hit explained.
-- Stop hook: edit a source file and end the turn with the check command failing. The turn is blocked once with the output, and a second Stop on the same tree state stays quiet.
+- Stop hook: edit a source file and end the turn with the check command failing. The turn is blocked once with the output; a second Stop on the same tree state stays quiet, and so does one after another edit that leaves the same failure.
 - `run-pure.mjs`: a probe importing `<SRC_DIR>/<module>` runs under Node with the alias resolved and `window` shimmed.
 
 ## Glossary
@@ -177,3 +177,4 @@ examples/       project-specific pieces, rewritten onto one invented app
 - `decisions-example.md` - a filled `.claude/docs/decisions.md`.
 - `verify-live-example.md` - the browser ritual with real endpoints.
 - `tree-marker-plugin.ts` - the Vite marker endpoint.
+- `tree-marker-next-route.ts` - the same marker as a Next.js App Router route handler.

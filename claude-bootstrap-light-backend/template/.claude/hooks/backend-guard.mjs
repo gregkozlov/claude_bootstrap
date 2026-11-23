@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 // PreToolUse guard for a server codebase, registered beside guard.mjs. It refuses what a backend adds to that list:
-//   Read / Grep                - a secret file: an env file, a private key, a credentials file (SECRET_PATHS).
+//   Read / Grep                - a secret file: an env file, a private key, a credentials file (SECRET_PATHS); and a
+//                                Grep that prints matching lines of a folder holding one git does not ignore.
 //   Edit / Write / MultiEdit   - a secret file; and a frozen file, one matching FROZEN_PATHS that is on the upstream
 //                                default branch (with no remote: that git tracks): a merged migration is never
 //                                edited, the change is a new migration.
 //   Bash / PowerShell          - a command that prints or copies a secret file, one that deletes or moves a frozen
 //                                file, and one that deploys, changes infrastructure or publishes (FORBIDDEN, plus the
-//                                project's own list). A command that destroys data, prints a secret from a cluster
-//                                or a cloud store, or opens a shell or a copy to another host is not refused: the
-//                                user is asked.
+//                                project's own list). A command that destroys data (a rollback past one step and a
+//                                database's data folder included), rewrites the migration history, prints a secret
+//                                from a cluster or a cloud store, or reaches another host (a shell, a copy, a tunnel,
+//                                a database client) is not refused: the user is asked.
 // It is a separate file so that guard.mjs stays the same file in every layer of this bootstrap.
 // Reads one JSON payload on stdin. Exit 2 with the reason on stderr blocks the call; exit 0 allows it; exit 0 with
 // a permissionDecision of "ask" on stdout hands the call to the user's permission prompt.
@@ -16,13 +18,13 @@
 // or a value read from the process environment, walks past it. It allows whatever it cannot parse.
 // Self-test: node .claude/hooks/tests/backend-guard-test.mjs
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 // The three project lists, filled at install as JSON arrays of regex sources inside the raw strings (INSTALL.md);
-// edit freely afterwards. An unfilled placeholder and an empty string read as an empty list, so a missed fill
-// leaves the built-in checks working; anything else is parsed for real, and a hook that throws allows every call -
-// run the self-test after editing one.
+// edit freely afterwards. An unfilled placeholder and an empty string read as an empty list, and so does a misfilled
+// one - broken JSON, not an array of strings, a regex that does not compile - which is named on stderr: a hook that
+// throws at load allows every call, so a typo costs only its own list. Run the self-test after editing one.
 //   frozen    - tested against the absolute file path with every backslash turned into "/", so it matches the
 //               path's tail and never starts with "^", e.g. ["db/migrations/[^/]+\\.sql$"]. Case-insensitive on
 //               Windows and macOS, where `Db/Migrations/001.sql` is the same file.
@@ -33,9 +35,23 @@ import path from 'node:path';
 const FROZEN_RAW = String.raw`<FROZEN_PATHS>`;
 const SECRET_RAW = String.raw`<SECRET_PATHS>`;
 const FORBIDDEN_RAW = String.raw`<FORBIDDEN_COMMANDS>`;
-const sources = (raw) => (raw.startsWith('<') || !raw.trim() ? [] : JSON.parse(raw));
+// Stderr on an allowed call reaches nobody, so a misfilled list is also told to the user (`systemMessage`, end of file).
+const listErrors = [];
+function regexList(name, raw, flags) {
+  if (raw.startsWith('<') || !raw.trim()) return [];
+  try {
+    const sources = JSON.parse(raw);
+    if (!Array.isArray(sources) || !sources.every((source) => typeof source === 'string')) throw new Error('not an array of strings');
+    return sources.map((source) => new RegExp(source, flags));
+  } catch (error) {
+    const message = `backend-guard.mjs: ${name} is not a JSON array of regex sources (${error.message}); it protects nothing until it is fixed.`;
+    listErrors.push(message);
+    process.stderr.write(`${message}\n`);
+    return [];
+  }
+}
 const FOLD = process.platform === 'win32' || process.platform === 'darwin';
-const FROZEN_PATHS = sources(FROZEN_RAW).map((source) => new RegExp(source, FOLD ? 'i' : ''));
+const FROZEN_PATHS = regexList('FROZEN_PATHS', FROZEN_RAW, FOLD ? 'i' : '');
 
 // Files whose content is a secret. A name that says it is an example (example, sample, template, dist, defaults)
 // holds names and placeholders and stays readable; so does a key or certificate whose name says it is public, a
@@ -67,7 +83,7 @@ const SECRET_PATHS = [
   /(?:^|\/)client_secret[^/]*\.json$/i,
   /(?:^|\/)application_default_credentials\.json$/i,
   /(?:^|\/)(?:\.config|AppData\/Roaming)\/gcloud(?:\/|$)/i,
-  ...sources(SECRET_RAW).map((source) => new RegExp(source, 'i')),
+  ...regexList('SECRET_PATHS', SECRET_RAW, 'i'),
 ];
 
 // A command name at a word start; `then` finds a verb anywhere among the words that follow it, `first` only where
@@ -80,8 +96,9 @@ const without = (flags) => String.raw`(?!.*\s(?:${flags})(?=\s|$))`;
 // there is `vercel` a deploy - after `npm install` it is a package name.
 const HEAD = String.raw`^(?:[A-Za-z_]\w*=\S*\s+)*(?:(?:npx|bunx|pnpm\s+(?:dlx|exec)|yarn(?:\s+dlx)?|npm\s+exec(?:\s+--)?)\s+(?:-\S+\s+)*)?(?:\S*[\\/])?`;
 // scope: what the pattern is tested against - 'bare' (a quoted argument with spaces is blanked: it is a message, a
-// filter or a name, never the verb), 'sql' (the whole segment but its SQL string literals) or 'words' (the bare
-// words as an array, for a source that is a function). hint: a sentence the refusal adds.
+// filter or a name, never the verb), 'sql' (the whole segment but its SQL string literals), 'words' (the bare
+// words as an array, for a source that is a function) or 'raw' (the words as typed, where a quoted value is the
+// thing to read: a connection string). Redirections are in none but 'sql'. hint: a sentence the refusal adds.
 const rule = (kind, label, source, scope = 'bare', hint = '') => ({
   kind,
   label,
@@ -106,6 +123,10 @@ const AWS_WRITE =
   String.raw`(?:delete|terminate|remove|put|create|run|stop|reboot|modify|deregister|register|attach|detach|publish|send|invoke|deploy|restore|purge|reset|revoke|authorize|associate|disassociate|import|execute|add|set|change|enable|disable|submit|copy|allocate|release|promote|failover|rotate|cancel|schedule|tag|untag)-[\w-]+|admin-(?!get-|list-)[\w-]+|start-(?!query|live-tail)[\w-]+|update-(?!kubeconfig)[\w-]+|batch-(?:write|delete|execute)-[\w-]+|rm|rb|mb|mv|deploy|invoke|publish|` +
   upload('cp|sync', 's3://');
 const localCluster = (flag) => `On a local cluster, retry with ${flag} kind-<name> (or minikube, docker-desktop).`;
+// The `dotnet ef database update` options whose next word is their value, not the migration to go to.
+const EF_VALUE = String.raw`(?:--(?:connection|context|project|startup-project|framework|configuration|runtime|msbuildprojectextensionspath)|-[cps])`;
+// golang-migrate by its own name: not a value (`--profile=migrate`, `COMPOSE_PROFILES=migrate`), not a script name.
+const GO_MIGRATE = String.raw`(?<![\w.:=-])(?<!--profile\s|-p\s|--project-name\s)(?<!(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?|bun\s+run|make|just|task)\s)migrate(?:\.exe)?(?![\w.:-])`;
 const FORBIDDEN = [
   rule('deploy', 'kubectl', tool('kubectl|oc') + first(String.raw`apply|delete|patch|replace|scale|rollout\s+(?:restart|undo|pause|resume)|drain|cordon|uncordon|taint|edit|set|create|annotate|label|exec|debug|cp|run|expose|autoscale|config\s+(?:use-context|set-context|delete-context|set-cluster|set-credentials|set)`), 'bare', localCluster('--context')),
   rule('deploy', 'helm', tool('helm|helmfile') + first('install|upgrade|uninstall|delete|rollback|push|apply|sync|destroy'), 'bare', localCluster('--kube-context')),
@@ -134,6 +155,12 @@ const FORBIDDEN = [
   // A folder profile publishes on this machine; DeployOnBuild with one passes too.
   rule('deploy', 'a .NET publish profile', String.raw`^(?!.*\bPublishProfile=FolderProfile\b|.*\bWebPublishMethod=FileSystem\b)(?:.*` + tool('dotnet') + first('publish|msbuild|build') + '|.*' + tool('msbuild') + String.raw`)(?=.*\s(?:[-\/]p|(?:--?|\/)property):\S*?\b(?:PublishProfile=|WebPublishMethod=|DeployOnBuild=true\b))`),
   rule('remote', 'ssh, scp, sftp or rsync to another host', (words) => Boolean(remoteHost(words)), 'words'),
+  // A tunnel to a database somewhere else - after a port-forward, `localhost` is that database - and a client the
+  // command's own words point at another host.
+  rule('remote', 'a tunnel to a cluster', String.raw`^(?!.*\s--context[= ](?:kind-[\w.-]+|k3d-[\w.-]+|minikube|docker-desktop|rancher-desktop|colima|orbstack)(?=\s|$)).*` + tool('kubectl|oc') + first('port-forward')),
+  rule('remote', 'a tunnel or a client session to a cloud database', cloudProxy, 'words'),
+  rule('remote', 'a tunnel or a client session to a cloud database', tool('gcloud') + then(String.raw`sql\s+connect|compute\s+start-iap-tunnel`) + '|' + tool('az') + then(String.raw`(?:postgres|mysql)\s+(?:flexible-server\s+|server\s+)?(?:connect|execute)`) + '|' + tool('heroku') + first(String.raw`pg:psql|psql|redis:cli`) + '|' + tool('fly|flyctl') + first(String.raw`proxy|(?:mpg|postgres|pg|redis)\s+(?:connect|proxy)`) + '|' + tool('railway') + first('connect')),
+  rule('remote', 'a database client on another host', remoteDatabase, 'raw'),
 
   rule('publish', 'an image push', tool('docker|podman|nerdctl') + '(?:(?:' + first('compose|image|manifest') + ')?' + first('push') + '|' + then('--push') + ')'),
   rule('publish', 'an image push', tool('docker-compose|podman-compose') + first('push')),
@@ -182,21 +209,39 @@ const FORBIDDEN = [
   rule('data', 'a database drop', tool('mongosh|mongo') + String.raw`.*(?:dropDatabase|\.drop\s*\(|deleteMany\s*\(\s*\{\s*\}\s*\))`, 'sql'),
   rule('data', 'a migration reset', tool('prisma') + String.raw`\s+(?:migrate\s+reset|db\s+push\b.*--(?:force-reset|accept-data-loss))(?=\s|$)`),
   rule('data', 'a migration reset', tool('artisan') + then(String.raw`migrate:(?:fresh|reset|refresh)|db:wipe`)),
-  rule('data', 'a database reset', tool('rails|rake') + then(String.raw`db:(?:drop|reset|purge|truncate_all|schema:load|structure:load|migrate:reset)(?::\w+)*|db:migrate\s+VERSION=0`)),
-  rule('data', 'a database flush', String.raw`(?:manage\.py|(?<![\w.-])django-admin)\s+(?:(?:flush|reset_db)|migrate\s+(?:-\S+\s+)*\S+\s+zero)(?=\s|$)`),
-  rule('data', 'a downgrade to nothing', tool('alembic') + then(String.raw`downgrade\s+base`) + '|' + tool('flask') + String.raw`\s+db\s+downgrade\s+base(?=\s|$)`),
-  rule('data', 'a database drop', String.raw`(?<![\w.-])(?:dotnet(?:\.exe)?\s+ef|dotnet-ef)(?:\s+-\S+(?:\s+(?!-)\S+)?)*?\s+database\s+(?:drop|update\s+0)(?=\s|$)`),
-  rule('data', 'a schema clean', String.raw`(?<!-pl\s|--projects\s)` + tool('flyway') + first('clean') + '|' + tool('liquibase') + then('drop-?all')),
+  // A rollback past the one migration a task iterates on - more than one step, or to a target the hook cannot size -
+  // asks; one step back (`alembic downgrade -1`, `db:rollback`, `goose down`) is the edit-and-retry loop and passes.
+  // STEP may stand anywhere in the call: before the command, or after another variable.
+  rule('data', 'a database reset or a rollback past one step', tool('rails|rake') + then(String.raw`db:(?:drop|reset|purge|truncate_all|schema:load|structure:load|migrate:reset)(?::\w+)*|db:migrate\s+VERSION=\S+`) + '|' + String.raw`^(?=(?:.*\s)?STEP=(?:[2-9]|\d{2,})(?=\s|$)).*` + tool('rails|rake') + then(String.raw`db:(?:rollback|migrate:redo)(?::\w+)?`)),
+  // The options before the app that take a value (`--settings x`, `--database x`, `-v 2`) are not the app.
+  rule('data', 'a database flush or a migrate to a named migration', String.raw`(?:manage\.py|(?<![\w.-])django-admin)\s+(?:(?:flush|reset_db)|migrate\s+(?:(?:--(?:settings|database|verbosity|pythonpath)|-v)\s+\S+\s+|(?!(?:--(?:settings|database|verbosity|pythonpath)|-v)\s)-\S+\s+)*[^-\s]\S*\s+[^-\s]\S*)(?=\s|$)`),
+  rule('data', 'a downgrade past one step', tool('alembic|flask') + then(String.raw`(?:db\s+)?downgrade\s+(?!-1(?=\s|$))\S+`)),
+  // The options that take a value are listed, as for Django: `--no-build InitialCreate` names a target.
+  rule('data', 'a database drop or an update to a named migration', String.raw`(?<![\w.-])(?:dotnet(?:\.exe)?\s+ef|dotnet-ef)(?:\s+-\S+(?:\s+(?!-)\S+)?)*?\s+database\s+(?:drop|update(?:\s+(?:${EF_VALUE}\s+\S+|(?!${EF_VALUE}\s|--\s)-\S+))*\s+[^-\s]\S*)(?=\s|$)`),
+  // One changeset back passes, as one step does everywhere else; the Maven and Gradle plugins are how a JVM
+  // project runs Liquibase.
+  rule('data', 'a schema clean or a rollback', String.raw`(?<!-pl\s|--projects\s)` + tool('flyway') + first('clean') + '|' + tool('liquibase') + then(String.raw`drop-?all|rollback[\w-]*(?<!-sql|Sql)(?!(?<=count)\s+(?:--count[= ])?1(?=\s|$))`)),
+  rule('data', 'a rollback past one step', String.raw`^(?!.*\s-Dliquibase\.rollbackCount=1(?=\s|$)).*` + tool('mvn|mvnw') + then(String.raw`(?:[\w.-]+:)*liquibase(?:-maven-plugin(?::[\w.-]+)?)?:rollback(?:OneChangeSet|OneUpdate)?`) + '|' + tool('gradle|gradlew') + then(String.raw`(?:[\w-]*:)*rollback(?:ToDate|OneChangeSet|OneUpdate)?`) + '|' + String.raw`^(?!.*\s-PliquibaseCommandValue=1(?=\s|$)).*` + tool('gradle|gradlew') + then(String.raw`(?:[\w-]*:)*rollbackCount`)),
+  // Rewriting the record of what ran is how a merged migration gets "changed" without an edit.
+  rule('history', 'a migration stamp', tool('alembic|flask') + then(String.raw`(?:db\s+)?stamp`)),
+  rule('history', 'a migration marked as run', String.raw`(?:manage\.py|(?<![\w.-])django-admin)\s+migrate\s+(?:\S+\s+)*?--fake(?=\s|$)` + '|' + tool('liquibase') + then(String.raw`changelog-?sync[\w-]*(?<!-sql|Sql)|mark-next-changeset-ran(?!-sql)`) + '|' + tool('gradle|gradlew|mvn|mvnw') + then(String.raw`(?:[\w.-]*:)*(?:changelogSync(?:ToTag)?|markNextChangesetRan)`)),
+  rule('history', 'a schema history repair', tool('flyway') + first('repair') + '|' + tool('liquibase') + then(String.raw`clear-?check-?sums`) + '|' + tool('gradle|gradlew|mvn|mvnw') + then(String.raw`(?:[\w.-]*:)*(?:flywayRepair|flyway:repair|clearCheckSums)`)),
+  rule('history', 'removing the newest migration', String.raw`(?<![\w.-])(?:dotnet(?:\.exe)?\s+ef|dotnet-ef)(?:\s+-\S+(?:\s+(?!-)\S+)?)*?\s+migrations\s+remove(?=\s|$)`),
+  rule('history', 'a migration marked applied or rolled back', tool('prisma') + String.raw`\s+migrate\s+resolve(?=\s|$)`),
   rule('data', 'a schema clean', tool('gradle|gradlew|mvn|mvnw') + then(String.raw`(?:[\w-]*:)*(?:flywayClean|flyway:clean|dropAll|liquibase:dropAll)`)),
   rule('data', 'a migration reset', tool('knex') + String.raw`.*\smigrate:rollback(?=\s).*\s--all(?=\s|$)`),
   rule('data', 'a database drop', tool(String.raw`sequelize|sequelize-cli|typeorm(?:-ts-node-(?:commonjs|esm))?|mikro-orm`) + then(String.raw`db:drop|db:migrate:undo:all|db:seed:undo:all|schema:drop|schema:fresh|migration:fresh`)),
-  rule('data', 'a database drop', String.raw`(?<![\w.:-])migrate(?:\.exe)?(?![\w.:-])` + then(String.raw`drop|down\s+-all`)),
-  rule('data', 'a database reset', tool('goose') + then(String.raw`reset|down-to\s+0`) + '|' + tool('atlas') + then(String.raw`schema\s+clean`)),
+  rule('data', 'a rollback past one step', tool('sequelize|sequelize-cli') + then(String.raw`db:migrate:undo(?=(?:\s+\S+)*?\s+--to(?:=|\s|$))`)),
+  // golang-migrate's bare `down` runs every down migration, and `goto` may run any number of them; `migrate` as a
+  // compose profile, a project name or a package script (`npm run migrate down`) is not it.
+  rule('data', 'a database drop or a rollback past one step', GO_MIGRATE + then(String.raw`drop|goto|down(?!\s+1(?=\s|$))`)),
+  rule('history', 'a forced migration version', GO_MIGRATE + then('force')),
+  rule('data', 'a database reset or a rollback to a version', tool('goose') + then(String.raw`reset|down-to`) + '|' + tool('atlas') + then(String.raw`schema\s+clean`)),
   rule('data', 'a database reset', tool('diesel|sqlx') + then(String.raw`database\s+(?:drop|reset)`) + '|' + tool('supabase') + then(String.raw`db\s+reset`)),
-  rule('data', 'a database drop', tool('mix') + then(String.raw`ecto\.(?:drop|reset)`)),
+  rule('data', 'a database drop or a rollback past one step', tool('mix') + then(String.raw`ecto\.(?:drop|reset)|ecto\.rollback(?=(?:\s+\S+)*?\s+(?:--all|--to(?:=|\s)|(?:-n|--step)(?:=|\s+)(?:[2-9]|\d{2,})))`)),
   rule('data', 'a database drop', String.raw`\bdoctrine:(?:database|schema):drop\b` + without('--dump-sql')),
 
-  ...sources(FORBIDDEN_RAW).map((source) => rule('project', 'FORBIDDEN_COMMANDS', source)),
+  ...regexList('FORBIDDEN_COMMANDS', FORBIDDEN_RAW, 'i').map((pattern) => rule('project', 'FORBIDDEN_COMMANDS', pattern)),
 ];
 const KIND = {
   deploy: 'deploys or changes infrastructure',
@@ -296,6 +341,112 @@ function remoteHost(words) {
   return hosts.find((host) => host && !LOCAL_HOST.test(host)) ?? '';
 }
 
+// A database client whose own words name another host: a host option or a connection URL. One run inside a
+// container talks to that container's network, and one that names no host connects where its environment says,
+// which the hook cannot read.
+const DB_CLIENTS = new Set([
+  'psql', 'pgcli', 'pg_dump', 'pg_dumpall', 'pg_restore', 'pg_basebackup', 'createdb', 'dropdb', 'createuser', 'dropuser', 'reindexdb', 'vacuumdb',
+  'mysql', 'mariadb', 'mycli', 'mysqldump', 'mariadb-dump', 'mysqladmin', 'mariadb-admin', 'mysqlimport', 'sqlcmd', 'invoke-sqlcmd', 'usql',
+  'cockroach', 'clickhouse-client', 'clickhouse', 'mongosh', 'mongo', 'mongodump', 'mongorestore', 'mongoexport', 'mongoimport', 'redis-cli',
+  'valkey-cli',
+]);
+// The clients that take a libpq connection string: `psql "host=db.example.com dbname=app"`.
+const LIBPQ_CLIENTS = new Set(['psql', 'pgcli', 'pg_dump', 'pg_dumpall', 'pg_restore', 'pg_basebackup']);
+const CONNINFO = /^(?:[a-z_]+\s*=\s*(?:'[^']*'|\S*)(?:\s+|$))+$/i;
+const CONNINFO_HOST = /(?:^|\s)host(?:addr)?\s*=\s*'?([^'\s]+)/i;
+// psql's variable assignment: `-v host=web1` sets a variable named host, it is not a connection string.
+const PSQL_VARIABLE = /^(?:-v|--set|--variable)$/;
+// kubectl and oc are here because a call into a cluster that is not a local one is refused before this rule reads it.
+const CONTAINER_RUNNERS = new Set(['docker', 'podman', 'nerdctl', 'docker-compose', 'podman-compose', 'kubectl', 'oc']);
+// A `docker run` of a client image sits on the default bridge and reaches outward; on a network it names, or beside
+// a linked container, it talks to that network. `exec` and compose are inside one already.
+function insideContainer(words, names, runner, at) {
+  const before = words.slice(runner + 1, at);
+  if (!/^(?:docker|podman|nerdctl)$/.test(names[runner]) || before.includes('compose') || !before.includes('run')) return true;
+  return words.some((word, index) => {
+    if (index <= runner) return false;
+    if (/^--link(?:=|$)/.test(word)) return true;
+    const network = /^--net(?:work)?(?:=(.*))?$/.exec(word);
+    return Boolean(network) && !/^(?:host|bridge|default|none)?$/.test(network[1] ?? words[index + 1] ?? '');
+  });
+}
+// A host a call assigns for the commands after it (`export PGHOST=...`, `$env:PGHOST = ...`, a database URL in any
+// variable): a client that names no host of its own connects there.
+let databaseElsewhere = false;
+const DB_ASSIGN = /(?:^|[\s;&|(])(?:export\s+|set\s+|\$env:)?([A-Za-z_]\w*)\s*=\s*["']?([^\s"';&|)]+)/g;
+function noteDatabaseAssignments(command) {
+  for (const [, name, value] of command.matchAll(DB_ASSIGN)) {
+    const host = /^(?:PGHOST|PGHOSTADDR|MYSQL_HOST)$/.test(name) ? value : DB_URL.exec(value)?.[1];
+    if (host && !localDatabaseHost(host)) databaseElsewhere = true;
+  }
+}
+// The Cloud SQL and AlloyDB proxies: the command a segment runs (a release asset is `cloud-sql-proxy.x64.exe`), also
+// behind Start-Process, or the image of a `docker run`. A download, a chmod or an install only names the file.
+const PROXY_NAME = /^(?:cloud[-_]sql[-_]proxy|alloydb-auth-proxy)(?:[._][\w.-]*)?$/;
+const PROXY_IMAGE = /(?:^|\/)(?:cloud-sql-proxy|alloydb-auth-proxy)(?:[:@]\S*)?$/i;
+function cloudProxy(words) {
+  if (words.some((word) => /^(?:--version|--help|-h|version|help)$/.test(word))) return false;
+  const names = words.map(commandName);
+  let at = commandAt(words, names);
+  if (/^(?:start-process|saps|start)$/.test(names[at] ?? '')) at = words.findIndex((word, index) => index > at && !word.startsWith('-'));
+  if (PROXY_NAME.test(names[at] ?? '')) return true;
+  return /^(?:docker|podman|nerdctl)$/.test(names[at] ?? '') && words.includes('run') && words.some((word) => PROXY_IMAGE.test(word));
+}
+// A database's own URL schemes only: a value such as `amqp://broker/orders` is data the client stores.
+const DB_URL = /^(?:jdbc:)?(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|valkey|sqlserver|clickhouse|cockroachdb):\/\/(?:[^@\/?#]*@)?(\[[^\]]*\]|[^:\/?#,;]+)/i;
+function localDatabaseHost(value) {
+  // sqlcmd spells a server as `tcp:host,1433` or `host\INSTANCE`; a path is a Unix socket; `::1` is no port.
+  const host = value.replace(/^(?:tcp|np|lpc):/i, '').replace(/[,\\].*$/, '');
+  const bare = LOCAL_HOST.test(host) ? host : host.replace(/:\d+$/, '');
+  return !bare || bare.startsWith('/') || LOCAL_HOST.test(bare) || /^(?:\.|\(local\)|\(localdb\)|0\.0\.0\.0|host\.docker\.internal)$/i.test(bare);
+}
+function remoteDatabase(words) {
+  const names = words.map(commandName);
+  let at = names.findIndex((name) => DB_CLIENTS.has(name));
+  if (at === -1) return false;
+  const runner = names.findIndex((name, index) => index < at && CONTAINER_RUNNERS.has(name));
+  if (runner !== -1) {
+    if (insideContainer(words, names, runner, at)) return false;
+    // In a `docker run` the client is the command after the image, never an option's value (`--name mongo`).
+    at = names.findIndex((name, index) => index > runner && DB_CLIENTS.has(name) && !words[index - 1].startsWith('-'));
+    if (at === -1) return false;
+  }
+  for (const word of words.slice(0, at)) {
+    const env = /^(?:(PGHOST|PGHOSTADDR|MYSQL_HOST)|[A-Za-z_]\w*)=(.+)$/.exec(word);
+    const host = env && (env[1] ? env[2] : DB_URL.exec(env[2])?.[1]);
+    if (host && !localDatabaseHost(host)) return true;
+  }
+  // `-S` is sqlcmd's server; for mysql it is a socket, for psql a mode with no value.
+  const sqlcmd = names[at] === 'sqlcmd';
+  const hostFlag = sqlcmd ? /^(?:-S|--server)$/ : names[at] === 'invoke-sqlcmd' ? /^-ServerInstance$/i : /^(?:-h|--host)$/;
+  const mongo = names[at] === 'mongosh' || names[at] === 'mongo';
+  // Whether the client's own words say where it connects: only one that says nothing follows the call's variable.
+  let named = false;
+  for (let index = at + 1; index < words.length; index += 1) {
+    const word = words[index];
+    const option = word.replace(/^--?[\w-]+=/, '');
+    const url = DB_URL.exec(option);
+    if (url) {
+      if (!localDatabaseHost(url[1])) return true;
+      named = true;
+      continue;
+    }
+    if (names[at] === 'psql' && PSQL_VARIABLE.test(word)) {
+      index += 1;
+      continue;
+    }
+    // mongosh's own address forms: `host:27017/app` and `db.example.com/app`.
+    const address = mongo && !word.startsWith('-') ? /^([\w-]+(?:\.[\w-]+)*):\d+(?:\/|$)|^([\w-]+(?:\.[\w-]+)+)\/[\w-]*$/.exec(word) : null;
+    const conninfo = LIBPQ_CLIENTS.has(names[at]) && CONNINFO.test(option) ? CONNINFO_HOST.exec(option) : null;
+    const joined = /^--(?:host|server)=(.+)$/i.exec(word) ?? (sqlcmd ? /^-S(.+)$/.exec(word) : names[at] === 'invoke-sqlcmd' ? null : /^-h(?!elp$)(.+)$/.exec(word));
+    const value = address ? (address[1] ?? address[2]) : conninfo ? conninfo[1] : joined ? joined[1] : hostFlag.test(word) ? (words[(index += 1)] ?? '') : null;
+    if (value === null) continue;
+    if (!localDatabaseHost(value)) return true;
+    named = true;
+  }
+  return databaseElsewhere && !named;
+}
+
 // A segment whose head only searches or prints text is not judged against FORBIDDEN: its arguments are patterns
 // and messages (`grep "terraform apply" docs`, `echo`, `git log --grep`).
 const QUIET = new Set([
@@ -342,10 +493,18 @@ const EXCLUDE_WORD = /^--exclude(?:-dir)?=/i;
 // whose value is a pattern or a name, never a path.
 const GIT_PRINTS = new Set(['show', 'diff', 'blame', 'cat-file']);
 const GIT_VALUE = /^--?(?:grep|S|G|author|committer|format|pretty|since|until)$/;
+// A pathspec that leaves files out (`:!x`, `:^x`, `:(exclude)x`, `:(exclude,glob)x`) is the opposite of a read.
+const GIT_EXCLUDE = /^:(?:!|\^|\((?:[\w,]*,)?exclude[,)])/;
 const REMOVERS = new Set([
   'rm', 'del', 'erase', 'ri', 'rd', 'rmdir', 'remove-item', 'unlink', 'mv', 'move', 'move-item', 'mi', 'ren',
   'rename-item', 'rni', 'truncate', 'shred', 'clear-content', 'clc',
 ]);
+// A database server's own data folder: a system or Homebrew install's, a Windows install's, or a bind mount named
+// for it.
+const DATA_DIR = /(?:^|\/)(?:var\/lib\/(?:postgresql|pgsql|mysql|mariadb|mongo(?:db)?|redis|clickhouse|cassandra|elasticsearch|docker\/volumes)|var\/opt\/mssql|usr\/local\/pgsql\/data|(?:opt\/homebrew|usr\/local)\/var\/(?:postgres(?:ql)?(?:@[\d.]+)?|mysql|mariadb|mongodb|redis)|PostgreSQL\/[^/]+\/data|MongoDB\/Server\/[^/]+\/data|MySQL\/MySQL Server [^/]+\/Data|MSSQL\/DATA|(?:pg|postgres(?:ql)?|mysql|mariadb|mongo(?:db)?|redis|db|database)[-_]?data)(?:\/|$)/i;
+// The same by where it starts: MongoDB's default `/data/db`, a `data/postgres` bind mount at the top of the project
+// (deeper down, `src/data/db` is code), and the variable a server's tools read the folder from.
+const DATA_ROOT = /^(?:\/data\/db|(?:\.\/)?data\/(?:postgres(?:ql)?|pg|mysql|mariadb|mongo(?:db)?|redis))(?:\/|$)|^\$(?:\{|env:)?(?:PGDATA|MYSQL_DATADIR)\b/i;
 // A command that runs the one it is handed, with the options of its own that take a value.
 const RUNNERS = new Map(Object.entries({ sudo: 'ugphCDRTU', doas: 'uC', xargs: 'InPLdEsa', env: 'uCS', timeout: 'sk', time: 'of', nice: 'n', nohup: '', command: '', exec: 'a' }));
 // A command that runs another one handed to it as a quoted word: that word is judged as a command of its own.
@@ -373,6 +532,7 @@ const QUESTION = {
   reveal: (label) => `backend-guard: this command prints secret values (${label}). ${RULE}: a secret is never read or printed - approve it only if you asked for exactly that.`,
   large: (label) => `backend-guard: a search over ${label} - the tree is too large to check for secret files; name the folders or exclude what it must not read. ${RULE}: approve it only if no env file or key sits under it.`,
   remote: (label) => `backend-guard: this command reaches another machine (${label}). ${RULE}: nothing the agent runs leaves the machine unasked - approve it only if you asked for exactly this, and check which host it is first.`,
+  history: (label) => `backend-guard: this command rewrites the record of which migrations ran (${label}). ${RULE}: a merged migration is never changed - approve it only if you asked for exactly that, and the migration it touches was never merged or applied anywhere else.`,
 };
 function ask(label, kind = 'data') {
   question ||= QUESTION[kind](label);
@@ -537,16 +697,23 @@ function withoutSubstitutions(command, shell) {
 
 // Splits a command into segments of words: quotes removed, comments dropped, a new segment at `;`, `&`, `|`, a
 // parenthesis or a line break. Bash escapes with a backslash, PowerShell with a backtick - there a backslash is a
-// path separator and stays.
+// path separator and stays. A redirection is not an argument: the descriptor before `>` (`2>&1`, `*>`) is dropped,
+// and the file after `>` or `<` is marked (`redirected`), so that no rule reads it as a verb or a target.
 function segmentsOf(command, shell) {
   const escape = shell === 'PowerShell' ? '`' : '\\';
   const segments = [];
   let words = [];
+  let redirected = new Set();
   let word = '';
   let started = false;
   let quote = '';
+  let redirect = false;
   const endWord = () => {
-    if (started) words.push(word);
+    if (started) {
+      if (redirect) redirected.add(words.length);
+      words.push(word);
+      redirect = false;
+    }
     word = '';
     started = false;
   };
@@ -556,11 +723,14 @@ function segmentsOf(command, shell) {
     endWord();
     if (words.length) {
       words.piped = /^\)?\|$/.test(joint.replace(/\s/g, ''));
+      words.redirected = redirected;
       segments.push(words);
       joint = '';
     }
     joint += by;
     words = [];
+    redirected = new Set();
+    redirect = false;
   };
   for (let index = 0; index < command.length; index += 1) {
     const ch = command[index];
@@ -585,7 +755,14 @@ function segmentsOf(command, shell) {
     } else if (ch === '#' && !started) {
       while (index + 1 < command.length && command[index + 1] !== '\n') index += 1;
     } else if (ch === '\n' || ';&|()'.includes(ch)) endSegment(ch);
-    else if (/\s/.test(ch) || ch === '<' || ch === '>') endWord();
+    else if (ch === '<' || ch === '>') {
+      if (ch === '>' && /^(?:\d+|\*)$/.test(word)) {
+        word = '';
+        started = false;
+      }
+      endWord();
+      redirect = true;
+    } else if (/\s/.test(ch)) endWord();
     else {
       word += ch;
       started = true;
@@ -595,19 +772,51 @@ function segmentsOf(command, shell) {
   return segments;
 }
 
-// A glob as grep's --include / --exclude reads it, against a base name; one brace group is expanded. PowerShell
+// Every form a glob's brace groups stand for: `{src,test}/*.{json,yaml}` is four globs.
+function braceForms(glob) {
+  const brace = /^(.*?)\{([^{}]*)\}(.*)$/.exec(glob);
+  return brace ? brace[2].split(',').flatMap((part) => braceForms(brace[1] + part + brace[3])) : [glob];
+}
+
+// A glob as grep's --include / --exclude reads it, against a base name; brace groups are expanded. PowerShell
 // and findstr match a name whatever its case ('i').
 function globTest(glob, flags = '') {
-  const brace = /^(.*)\{([^{}]*)\}(.*)$/.exec(glob);
-  const forms = brace ? brace[2].split(',').map((part) => brace[1] + part + brace[3]) : [glob];
-  const patterns = forms.map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, flags));
+  const patterns = braceForms(glob).map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, flags));
   return (name) => patterns.some((pattern) => pattern.test(name));
 }
+
+// A glob as ripgrep and the Grep tool read it: one without a slash against the file name, one with a slash against
+// the path under the search folder (`**/` any folders, `*` within one). Where only a name is known (the walk), the
+// path form answers `unknown`.
+function rgGlobTest(glob, unknown) {
+  if (!glob.includes('/')) return globTest(glob);
+  const token = { '**/': '(?:.*/)?', '**': '.*', '*': '[^/]*', '?': '[^/]' };
+  const patterns = braceForms(glob).map(
+    (form) => new RegExp(`^${form.replace(/^\//, '').replace(/[.+^$()|\\]/g, '\\$&').replace(/\*\*\/|\*\*|\*|\?/g, (match) => token[match])}$`),
+  );
+  return (name, relative) => (relative === undefined ? unknown : patterns.some((pattern) => pattern.test(relative)));
+}
+
+// A ripgrep file type as the extensions it takes, for the types a secret file can carry.
+const RG_TYPES = {
+  yaml: '*.{yaml,yml}',
+  tf: '*.{tf,tfvars,tf.json}',
+  json: '*.{json,jsonl}',
+  config: '*.{cfg,conf,config,ini}',
+  sh: '{*.sh,*.bash,*.zsh,*.env,.env}',
+  java: '*.{java,jsp,jspx,properties}',
+  gradle: '{*.gradle,*.gradle.kts,gradle.properties}',
+};
+const typeGlob = (type) => RG_TYPES[type] ?? `*.${type}`;
+// The Grep tool's `glob` is a list: split at spaces, and at commas outside a brace group.
+const grepGlobs = (glob) => glob.split(/\s+/).flatMap((part) => (/[{}]/.test(part) ? [part] : part.split(','))).filter(Boolean);
+// A keystore is binary: a search prints "Binary file matches" for it, never its bytes - unless told to read it as text.
+const BINARY_SECRET = /\.(?:p12|pfx|jks|keystore)$/i;
 
 // The first secret file a search reads under the folder, breadth first, past node_modules and .git; at the entry
 // cap, TOO_LARGE - whatever lies beyond it is unknown. The filters: `include` (a name must match one, when there is
 // any), `name` (and this one), `exclude`, `excludeDir`, and `depth`, the folder levels below the first it reads.
-const noFilters = () => ({ include: [], exclude: [], excludeDir: [], name: null, depth: Infinity });
+const noFilters = () => ({ include: [], exclude: [], excludeDir: [], name: null, depth: Infinity, binary: false });
 function secretUnder(folder, filters) {
   const queue = [[folder, 0]];
   let seen = 0;
@@ -635,6 +844,117 @@ function secretUnder(folder, filters) {
     }
   }
   return '';
+}
+
+// The Grep tool and `git grep` skip what git ignores, but not a secret file git tracks (or, with --untracked, one it
+// does not ignore): the first such file under the folder that the filters let through. A folder git ignores itself,
+// which the Grep tool still reads when it is named as the path, or one outside a repository, is walked instead -
+// `walkIgnored` false for `git grep`, which never reads an untracked file. A worktree's root is never "ignored":
+// the repo it sits in may ignore its folder, but the worktree is a repo of its own.
+function listedSecret(folder, filters, args = ['--cached', '--others', '--exclude-standard'], walkIgnored = true) {
+  let names;
+  if (walkIgnored) {
+    try {
+      if (git(folder, ['rev-parse', '--show-prefix']).trim()) {
+        git(path.dirname(folder), ['check-ignore', '-q', '--', path.basename(folder)]);
+        return secretUnder(folder, filters);
+      }
+    } catch {
+      // Not ignored, a repository's root, or no repository: ls-files below tells which.
+    }
+  }
+  try {
+    names = execFileSync('git', ['-C', folder, 'ls-files', '-z', ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+      maxBuffer: 256 * 1024 * 1024,
+    }).split('\0');
+  } catch {
+    return secretUnder(folder, filters);
+  }
+  for (const name of names) {
+    const base = name.slice(name.lastIndexOf('/') + 1);
+    // The secret lists read the whole path: a project entry such as `config/local\.settings\.json$` still holds
+    // when the search starts inside `config`, and so does the `templates/` exemption.
+    if (
+      name &&
+      isSecret(path.join(folder, name)) &&
+      (filters.binary || !BINARY_SECRET.test(name)) &&
+      (!filters.include.length || filters.include.some((test) => test(base, name))) &&
+      !filters.exclude.some((test) => test(base, name))
+    ) {
+      return path.join(folder, name);
+    }
+  }
+  return '';
+}
+
+// Only a search that prints matching lines puts a secret's value in the transcript; a list of file names does not.
+function checkGrepTool(input, cwd) {
+  if (input.output_mode !== 'content') return;
+  const folder = absolute(typeof input.path === 'string' && input.path ? input.path : '.', cwd);
+  try {
+    if (!statSync(folder).isDirectory()) return;
+  } catch {
+    return;
+  }
+  const filters = noFilters();
+  for (const glob of typeof input.glob === 'string' ? grepGlobs(input.glob) : []) {
+    const excluded = glob.startsWith('!');
+    (excluded ? filters.exclude : filters.include).push(rgGlobTest(glob.replace(/^!/, ''), !excluded));
+  }
+  if (typeof input.type === 'string' && input.type) filters.include.push(globTest(typeGlob(input.type)));
+  const secret = listedSecret(folder, filters);
+  if (secret === TOO_LARGE) ask(normalized(folder), 'large');
+  else if (secret) {
+    deny(
+      `Blocked by .claude/hooks/backend-guard.mjs: this Grep prints the matching lines of every file it reads under ${normalized(folder)}, and ${normalized(path.relative(cwd, secret))} there is a secret file git does not ignore (SECRET_PATHS). ${RULE}: leave it out with a glob, a type or a narrower path, or ask for file names only (output_mode files_with_matches).`,
+    );
+  }
+}
+
+// `git grep` prints the matching lines of the files git tracks under its pathspecs; -l, -L, -c and -q print none.
+const GIT_GREP_NAMES_ONLY = /^(?:-[A-Za-z]*[lLcq][A-Za-z]*|--(?:files-with-matches|name-only|files-without-match|count|quiet))$/;
+const GIT_GREP_VALUE = /^(?:-[ABCmef]|--(?:max-depth|threads|max-count|after-context|before-context|context|regexp|file))$/;
+function checkGitGrep(words, names, cwd) {
+  const at = commandAt(words, names);
+  let dir = cwd;
+  let index = at + 1;
+  for (; index < words.length && words[index].startsWith('-'); index += 1) {
+    if (/^-[Cc]$/.test(words[index])) {
+      if (words[index] === '-C') dir = absolute(words[index + 1] ?? '.', dir);
+      index += 1;
+    }
+  }
+  if (words[index] !== 'grep') return;
+  const rest = words.slice(index + 1);
+  if (rest.some((word) => GIT_GREP_NAMES_ONLY.test(word))) return;
+  const dash = rest.indexOf('--');
+  let specs = [];
+  if (dash !== -1) specs = rest.slice(dash + 1);
+  else {
+    let patternGiven = false;
+    for (let position = 0; position < rest.length; position += 1) {
+      if (GIT_GREP_VALUE.test(rest[position])) {
+        if (/^(?:-[ef]|--regexp|--file)$/.test(rest[position])) patternGiven = true;
+        position += 1;
+      } else if (!rest[position].startsWith('-')) specs.push(rest[position]);
+    }
+    if (!patternGiven) specs = specs.slice(1);
+  }
+  const noIndex = rest.includes('--no-index');
+  const args = rest.includes('--untracked') ? ['--cached', '--others', '--exclude-standard'] : ['--cached'];
+  const filters = { ...noFilters(), binary: rest.some((word) => /^(?:-[A-Za-z]*a[A-Za-z]*|--text)$/.test(word)) };
+  const secret = noIndex
+    ? (specs.length ? specs : ['.']).map((spec) => secretUnder(absolute(spec, dir), noFilters())).find(Boolean)
+    : listedSecret(dir, filters, [...args, '--', ...specs], false);
+  if (secret === TOO_LARGE) ask(normalized(dir), 'large');
+  else if (secret) {
+    deny(
+      `Blocked by .claude/hooks/backend-guard.mjs: this git grep prints the matching lines of the files it reads, and ${normalized(path.relative(cwd, secret))} is a secret file among them (SECRET_PATHS). ${RULE}: narrow the pathspec (\`-- '*.java'\`, or \`':!<that file>'\`), or list file names only (-l).`,
+    );
+  }
 }
 
 // The word a segment runs: past its leading assignments and past a runner with its own options (`sudo -u app`,
@@ -699,8 +1019,7 @@ function ripgrepWalks(words, reader) {
       const test = globTest(glob.replace(/^!/, '').replace(/\/(?:\*\*)?$/, ''));
       for (const list of glob.startsWith('!') ? [filters.exclude, filters.excludeDir] : [filters.include]) list.push(test);
     } else if (/^(?:-[A-Za-z]*t|--type)$/.test(flag)) {
-      const type = value();
-      filters.include.push(globTest(type === 'yaml' ? '*.{yaml,yml}' : `*.${type}`));
+      filters.include.push(globTest(typeGlob(value())));
     } else if (/^(?:-[A-Za-z]*[ef]|--regexp|--file)$/.test(flag)) {
       value();
       patternGiven = true;
@@ -850,16 +1169,17 @@ function checkSegment(words, shell, cwd, depth, feed) {
   // The head keeps its spaces (a quoted path to the binary); so does PowerShell's -ArgumentList, the tool's own
   // words. A shell body is judged below, as a command of its own.
   const blank = (word, index) => /\s/.test(word) && (index !== headAt || /[\r\n]/.test(word)) && !/^-(?:ArgumentList|Args)$/i.test(words[index - 1] ?? '');
-  const bareWords = words.map((word, index) => (blank(word, index) ? '_' : word));
+  const argument = (word, index) => !words.redirected?.has(index);
+  const bareWords = words.map((word, index) => (blank(word, index) ? '_' : word)).filter(argument);
   const bare = bareWords.join(' ');
-  const scopes = { bare, sql: text.replace(/'[^']*'/g, "''"), words: bareWords };
+  const scopes = { bare, sql: text.replace(/'[^']*'/g, "''"), words: bareWords, raw: words.filter(argument) };
   // `sls` is Select-String in PowerShell and the serverless CLI everywhere else.
   const quiet = QUIET.has(head) && !(head === 'sls' && /^(?:deploy|remove)$/i.test(words[headAt + 1] ?? ''));
 
   if (!quiet) {
     for (const { kind, label, scope, pattern, hint } of FORBIDDEN) {
       if (!pattern.test(scopes[scope])) continue;
-      if (kind === 'data' || kind === 'reveal' || kind === 'remote') {
+      if (kind === 'data' || kind === 'reveal' || kind === 'remote' || kind === 'history') {
         ask(label, kind);
         continue;
       }
@@ -894,8 +1214,8 @@ function checkSegment(words, shell, cwd, depth, feed) {
     words.forEach((word, index) => {
       const before = words[index - 1] ?? '';
       if (index === reader || index < from || index === destination) return;
-      // An exclusion is the opposite of a read.
-      if (word.startsWith('!') || EXCLUDE_WORD.test(word) || EXCLUDE_FLAG.test(before)) return;
+      // An exclusion is the opposite of a read - a git pathspec's `:!`, `:^` and `:(exclude)` included.
+      if (word.startsWith('!') || GIT_EXCLUDE.test(word) || EXCLUDE_WORD.test(word) || EXCLUDE_FLAG.test(before)) return;
       const flag = word.startsWith('-');
       const values = flag ? word.split(/[=:]/).slice(1) : [word, ...word.split(/[=,]/)];
       if (!flag && index > reader && (EXPRESSION.test(before) || (!patternSeen && !PATH_PARAM.test(before)))) {
@@ -912,7 +1232,7 @@ function checkSegment(words, shell, cwd, depth, feed) {
   if (head === 'git' && (names.some((name) => GIT_PRINTS.has(name)) || (names.includes('log') && words.some((word) => /^(?:-p|-u|--patch)$/.test(word))))) {
     words.forEach((word, index) => {
       const target = word.includes(':') ? word.slice(word.lastIndexOf(':') + 1) : word;
-      if (!word.startsWith('-') && !GIT_VALUE.test(words[index - 1] ?? '') && target && isSecret(target)) secretRefusal(target, 'print');
+      if (!word.startsWith('-') && !GIT_EXCLUDE.test(word) && !GIT_VALUE.test(words[index - 1] ?? '') && target && isSecret(target)) secretRefusal(target, 'print');
     });
   }
 
@@ -921,6 +1241,15 @@ function checkSegment(words, shell, cwd, depth, feed) {
       if (!word.startsWith('-') && frozenAt(word, cwd)) frozenRefusal(word, 'delete or move');
     }
   }
+  // A database's own data folder, wherever it is: guard.mjs refuses a recursive delete inside the project only.
+  // `git rm --cached` only stops tracking it.
+  if (!(head === 'git' && words.includes('--cached'))) {
+    for (const word of removed(words, names)) {
+      if (!word.startsWith('-') && (DATA_DIR.test(normalized(word)) || DATA_ROOT.test(normalized(word)))) ask('a database data folder', 'data');
+    }
+  }
+
+  if (head === 'git') checkGitGrep(words, names, cwd);
 
   if (depth < MAX_DEPTH && names.some((name) => LAUNCHERS.has(name))) {
     // cmd reads a backslash as a path separator, as PowerShell does; anything else keeps the caller's shell.
@@ -948,6 +1277,7 @@ function checkCommand(command, shell, cwd, depth) {
   const { outer, bodies } = withoutSubstitutions(depth === 0 ? withoutHeredocs(command) : command, shell);
   if (depth < MAX_DEPTH) for (const body of bodies) checkCommand(body, shell, cwd, depth + 1);
   noteDockerAssignments(outer);
+  noteDatabaseAssignments(outer);
   // A .NET file call reads or writes the path it names: `[IO.File]::ReadAllText('.env')`.
   for (const [call] of outer.matchAll(/\[(?:System\.)?IO\.File\]::\w+\s*\([^)]*\)/gi)) checkCodeLiterals(call);
   // `< file` feeds the file to whatever reads stdin; `<<` is a heredoc and `<(` a process substitution. A quoted
@@ -975,14 +1305,18 @@ try {
   if (name === 'Read') checkRead(input.file_path);
   else if (name === 'Grep') {
     checkRead(input.path);
-    if (typeof input.glob === 'string' && reaches(input.glob)) secretRefusal(input.glob, 'read');
+    // A glob that leaves a file out (`!.env`) is the opposite of a read.
+    for (const glob of typeof input.glob === 'string' ? grepGlobs(input.glob) : []) if (!glob.startsWith('!') && reaches(glob)) secretRefusal(glob, 'read');
+    checkGrepTool(input, cwd);
   } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') checkWrite(input.file_path, cwd);
   else if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') checkCommand(input.command, name, cwd, 0);
 } catch {
   // Unparseable input: allow. guard.mjs, the deny list in settings.json and the rules still apply.
   question = '';
 }
-if (question) {
-  process.stdout.write(`${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: question } })}\n`);
+if (question || listErrors.length) {
+  const output = listErrors.length ? { systemMessage: listErrors.join(' ') } : {};
+  if (question) output.hookSpecificOutput = { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: question };
+  process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 process.exit(0);

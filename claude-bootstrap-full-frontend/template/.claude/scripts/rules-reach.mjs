@@ -17,7 +17,6 @@ if (typeof path.posix.matchesGlob !== 'function') {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RULES = path.join(ROOT, '.claude', 'rules');
 const RULE_BUDGET = 20 * 1024;
-const SRC = '<SRC_DIR>/';
 // Sessions never stage, so a file this change created is untracked and still has to count.
 const LS_FILES = ['-C', ROOT, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'];
 
@@ -112,9 +111,10 @@ if (process.argv[2] === '--check') {
     process.exitCode = 1;
   }
 } else {
-  const files = listedFiles().filter((file) => file.startsWith(SRC) && /\.(tsx?|jsx?|mjs|py|rs|go|java|kt|cs)$/.test(file));
+  // Every source folder, not only the main one: a rule loads for a file in `lib/` as much as for one in `src/`.
+  const files = listedFiles().filter((file) => !file.startsWith('.claude/') && /\.(tsx?|jsx?|mjs|vue|svelte|py|rs|go|java|kt|cs)$/.test(file));
   if (files.length === 0) {
-    console.log(`no source files under ${SRC} - nothing to measure`);
+    console.log('no source files - nothing to measure');
   } else {
     const reach = (rule) => files.filter((file) => matches(rule, file)).length;
     const perFile = files
@@ -133,7 +133,11 @@ if (process.argv[2] === '--check') {
     for (const f of perFile.slice(0, 15)) console.log(`| ${kb(f.bytes)} | ${f.file} | ${f.rules.join(', ')} |`);
     console.log('\n| Rule | Size | Files | Globs matching nothing |\n| --- | ---: | ---: | --- |');
     for (const rule of [...rules].sort((a, b) => b.size * reach(b) - a.size * reach(a))) {
-      const dead = rule.globs.filter((glob) => glob.startsWith(SRC) && !files.some((file) => path.posix.matchesGlob(file, glob)));
+      // A personal layer is excluded from git, so a glob on a layer file would read as dead: those are not judged.
+      // A glob with no slash (its `/**` tail aside) is alive when the loader's any-depth match finds a file: its
+      // SHAPE line above already says what is wrong with it.
+      const alive = (glob, file) => path.posix.matchesGlob(file, glob) || (!glob.replace(/\/\*\*$/, '').includes('/') && path.posix.matchesGlob(file, `**/${glob}`));
+      const dead = rule.globs.filter((glob) => !glob.startsWith('.claude/') && !listedFiles().some((file) => alive(glob, file)));
       console.log(`| ${rule.name} | ${kb(rule.size)} | ${reach(rule)} | ${dead.join(', ')} |`);
     }
   }

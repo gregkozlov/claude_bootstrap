@@ -1,6 +1,8 @@
 // Example from a Vite project (vite.config.ts). Depends on: Vite (any version with configureServer),
 // git on PATH. Not part of the template - paste the plugin by hand into the project's vite.config.ts and add it
-// to `plugins`. For another dev server, expose the same JSON at <DEV_BASE_PATH>__tree.
+// to `plugins`. Next.js App Router: tree-marker-next-route.ts. Another dev server exposes the same JSON at
+// <DEV_BASE_PATH>__tree from its own middleware hook (webpack-dev-server: `setupMiddlewares`); one with no such hook
+// (Angular CLI's `ng serve`) cannot carry the marker, and the browser check stays off there.
 //
 // Dev-only marker at <base>__tree: which machine, tree and branch this server serves. Two trees share
 // one config with no strictPort, and a second machine answers on the same localhost port, so neither

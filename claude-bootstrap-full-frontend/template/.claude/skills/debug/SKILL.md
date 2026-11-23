@@ -37,7 +37,7 @@ Two facts are written for each boundary: expected and observed. The divergence s
 
 The cheapest instrument is a **working twin**: the sibling that renders the same value correctly (the other table, the other detail screen, the mirror endpoint). Diff the broken site against it at each boundary - every difference, however small, is a candidate, and the list is usually short.
 
-**Temporary instrumentation** in `<SRC_DIR>/` - a `console.log`, a debug attribute, a forced flag - is the one edit allowed before the cause is named, and the one allowed before `lifecycle` loads: it observes and fixes nothing. It goes only at a boundary that separates the surviving hypotheses, every line carries one tag, `DEBUG-PROBE <task-slug>`, and that tag is grepped to zero before the fix lands. Do not count on anything else to catch a leftover: a lint rule against it may not exist.
+**Temporary instrumentation** in the source (`<SRC_DIR>/` or another source folder) - a `console.log`, a debug attribute, a forced flag - is the one edit allowed before the cause is named, and the one allowed before `lifecycle` loads: it observes and fixes nothing. It goes only at a boundary that separates the surviving hypotheses, every line carries one tag, `DEBUG-PROBE <task-slug>`, and that tag is grepped to zero before the fix lands. Do not count on anything else to catch a leftover: a lint rule against it may not exist.
 
 ## 3. Name the cause
 

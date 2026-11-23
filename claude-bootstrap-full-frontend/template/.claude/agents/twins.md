@@ -24,7 +24,7 @@ This is not the consumer walk from `CLAUDE.md` step 2: that lists who *uses* the
 ## Procedure
 
 1. **Name the pattern precisely.** From the diff, write down the before-shape and the after-shape as code fragments, plus the tokens that identify the before-shape (a call, a prop, a hook, a class name, a comparator, a hard-coded value). One change can carry several patterns; list each.
-2. **Search wide, three ways.** (a) Grep the before-shape's tokens across `<SRC_DIR>/` (never a generated directory). (b) Walk this repo's known twins, whether or not the grep hit them - the list below. (c) Read the closest sibling of every changed file in full - a twin that drifted may spell the same pattern with different names, and the grep misses it.
+2. **Search wide, three ways.** (a) Grep the before-shape's tokens across the whole repository from its root - every source folder, not only `<SRC_DIR>/` (the Grep tool skips gitignored output; never a generated directory). (b) Walk this repo's known twins, whether or not the grep hit them - the list below. (c) Read the closest sibling of every changed file in full - a twin that drifted may spell the same pattern with different names, and the grep misses it.
 3. **Classify every candidate** against the after-shape, reading the site's code, not its name:
    - **same** - the same shape; the change transplants with only names changed. Write the patch: the exact old and new lines.
    - **analogous** - the same defect or the same missing capability, but the code differs enough that the transplant needs a decision (a different helper, an extra parameter, a state shape). Write the patch you would apply and name the decision it hinges on.

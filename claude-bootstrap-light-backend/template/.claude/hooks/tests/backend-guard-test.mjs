@@ -6,7 +6,8 @@
 //   2. the three project lists, against a copy of the hook with known values, in a throwaway git repo in the temp
 //      directory (a frozen file is one on the upstream default branch, or with no remote one git tracks, so the
 //      cases need commits and remote refs of their own, never ones in this tree);
-//   3. the same copy with the lists unfilled: a missed fill protects nothing extra and breaks nothing.
+//   3. the same copy with the lists unfilled: a missed fill protects nothing extra and breaks nothing; and misfilled:
+//      a broken list empties itself only.
 // Add the project's own cases at the marked place: one per entry of its three lists.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -412,6 +413,132 @@ const builtIn = [
   ['supabase db reset (ask)', 'ask', bash('supabase db reset')],
   ['a refusal beside a question (deny)', 2, bash('psql -d app -c "DROP TABLE users" && terraform apply')],
 
+  // A rollback past one step, or to a target the hook cannot size; one step back is the edit-and-retry loop.
+  ['alembic downgrade two steps (ask)', 'ask', bash('alembic downgrade -2')],
+  ['alembic downgrade to a named revision (ask)', 'ask', bash('alembic downgrade 1975ea83b712')],
+  ['flask db downgrade, one step by default (allow)', 0, bash('flask db downgrade')],
+  ['dotnet ef database update to a named migration (ask)', 'ask', pwsh('dotnet ef database update InitialCreate')],
+  ['dotnet ef database update with an option only (allow)', 0, pwsh('dotnet ef database update --context AppDb')],
+  ['rails db:rollback by one (allow)', 0, bash('bin/rails db:rollback')],
+  ['rails db:rollback three steps (ask)', 'ask', bash('bin/rails db:rollback STEP=3')],
+  ['rails db:migrate to a version (ask)', 'ask', bash('bin/rails db:migrate VERSION=20240101000000')],
+  ['manage.py migrate to a named migration (ask)', 'ask', bash('python manage.py migrate orders 0003_add_status')],
+  ['manage.py migrate one app (allow)', 0, bash('python manage.py migrate orders')],
+  ['golang-migrate bare down, which runs them all (ask)', 'ask', bash('migrate -path db/migrations -database "$DATABASE_URL" down')],
+  ['golang-migrate down by three (ask)', 'ask', bash('migrate -path db/migrations -database "$DATABASE_URL" down 3')],
+  ['goose down by one (allow)', 0, bash('goose down')],
+  ['goose down-to a version (ask)', 'ask', bash('goose down-to 20240101')],
+  ['ecto.rollback by one (allow)', 0, bash('mix ecto.rollback')],
+  ['ecto.rollback three steps (ask)', 'ask', bash('mix ecto.rollback --step 3')],
+  ['liquibase rollback-count (ask)', 'ask', bash('liquibase rollback-count 2')],
+  ['liquibase rollback-sql, which only prints (allow)', 0, bash('liquibase rollback-sql v1')],
+  ['sequelize undo down to a migration (ask)', 'ask', bash('npx sequelize-cli db:migrate:undo --to 20240101-create-user.js')],
+  ['sequelize undo of one (allow)', 0, bash('npx sequelize-cli db:migrate:undo')],
+  // A redirection is not a target: the forward and the one-step commands pass with their output piped or logged.
+  ['dotnet ef database update with stderr joined and piped (allow)', 0, bash('dotnet ef database update 2>&1 | tail -20')],
+  ['dotnet ef database update into a log file (allow)', 0, pwsh('dotnet ef database update *> ef.log')],
+  ['flask db downgrade with stderr joined (allow)', 0, bash('flask db downgrade 2>&1')],
+  ['manage.py migrate one app into a log file (allow)', 0, bash('python manage.py migrate orders > migrate.log')],
+  ['alembic downgrade two steps into a log file (ask)', 'ask', bash('alembic downgrade -2 > downgrade.log 2>&1')],
+  ['dotnet ef database update, a flag with no value before the target (ask)', 'ask', pwsh('dotnet ef database update --no-build InitialCreate')],
+  ["dotnet ef database update, the app's own arguments after -- (allow)", 0, pwsh('dotnet ef database update -- --environment Development')],
+  ['rails db:rollback, STEP after another variable (ask)', 'ask', bash('bin/rails db:rollback RAILS_ENV=test STEP=3')],
+  ['rails db:rollback, STEP before the command (ask)', 'ask', bash('STEP=3 bin/rails db:rollback')],
+  ['rails db:migrate:redo three steps (ask)', 'ask', bash('bin/rails db:migrate:redo STEP=3')],
+  ['golang-migrate goto a version (ask)', 'ask', bash('migrate -path db/migrations -database "$DATABASE_URL" goto 3')],
+  ['golang-migrate down by one (allow)', 0, bash('migrate -path db/migrations -database "$DATABASE_URL" down 1')],
+  ['a package script named migrate (allow)', 0, bash('npm run migrate down')],
+  ['compose down with the profile joined by = (allow)', 0, bash('docker compose --profile=migrate down')],
+  ['liquibase rollback-count of one (allow)', 0, bash('liquibase rollback-count 1')],
+  ['maven liquibase:rollback by three (ask)', 'ask', bash('mvn liquibase:rollback -Dliquibase.rollbackCount=3')],
+  ['maven liquibase:rollback by one (allow)', 0, bash('mvn liquibase:rollback -Dliquibase.rollbackCount=1')],
+  ['gradle rollbackCount by three (ask)', 'ask', bash('./gradlew rollbackCount -PliquibaseCommandValue=3')],
+  ['gradle rollbackSql, which only prints (allow)', 0, bash('./gradlew rollbackSql -PliquibaseCommandValue=v1')],
+
+  // Rewriting the record of which migrations ran.
+  ['alembic stamp (ask)', 'ask', bash('alembic stamp head')],
+  ['flask db stamp (ask)', 'ask', bash('flask db stamp head')],
+  ['flyway repair (ask)', 'ask', bash('flyway -url=jdbc:h2:mem:x repair')],
+  ['gradle flywayRepair (ask)', 'ask', bash('./gradlew flywayRepair')],
+  ['dotnet ef migrations remove (ask)', 'ask', pwsh('dotnet ef migrations remove')],
+  ['dotnet ef migrations add (allow)', 0, pwsh('dotnet ef migrations add AddStatus')],
+  ['prisma migrate resolve (ask)', 'ask', bash('npx prisma migrate resolve --applied 20240101_init')],
+  ['maven liquibase:changelogSync (ask)', 'ask', bash('mvn liquibase:changelogSync')],
+  ['gradle changelogSync (ask)', 'ask', bash('./gradlew changelogSync')],
+  ['gradle changelogSyncSql, which only prints (allow)', 0, bash('./gradlew changelogSyncSql')],
+  ['liquibase clear-checksums (ask)', 'ask', bash('liquibase clear-checksums')],
+
+  // A tunnel to a database somewhere else, and a client pointed at another host by its own words.
+  ['kubectl port-forward (ask)', 'ask', bash('kubectl port-forward svc/postgres 5432:5432')],
+  ['kubectl port-forward on a named remote context (ask)', 'ask', bash('kubectl --context prod-eu port-forward svc/postgres 5432:5432')],
+  ['kubectl port-forward on a kind cluster (allow)', 0, bash('kubectl --context kind-dev port-forward svc/postgres 5432:5432')],
+  ['gcloud sql connect (ask)', 'ask', bash('gcloud sql connect prod-db --user=app')],
+  ['cloud-sql-proxy (ask)', 'ask', bash('cloud-sql-proxy my-project:europe-west1:prod-db')],
+  ['az postgres flexible-server connect (ask)', 'ask', pwsh('az postgres flexible-server connect -n prod-db -u app')],
+  ['heroku pg:psql (ask)', 'ask', bash('heroku pg:psql -a app')],
+  ['fly proxy (ask)', 'ask', bash('fly proxy 5432 -a app-db')],
+  ['psql to another host (ask)', 'ask', bash('psql -h db.prod.internal -U app -d app')],
+  ['psql to localhost (allow)', 0, bash('psql -h localhost -U app -d app')],
+  ['psql with a URL to another host (ask)', 'ask', bash('psql postgresql://db.prod.internal:5432/app')],
+  ['psql with a local URL (allow)', 0, bash('psql postgresql://127.0.0.1:5432/app')],
+  ['psql with PGHOST set to another host (ask)', 'ask', bash('PGHOST=db.prod.internal psql -d app')],
+  ['psql in single-line mode, no host (allow)', 0, bash('psql -S -d app -c "SELECT 1"')],
+  ['mysql with a joined host (ask)', 'ask', bash('mysql -hdb.staging.internal -u app app')],
+  ['mysql over a socket (allow)', 0, bash('mysql -S /var/run/mysqld/mysqld.sock -u app')],
+  ['sqlcmd to another server (ask)', 'ask', pwsh('sqlcmd -S tcp:sql.prod.internal,1433 -d app -Q "SELECT 1"')],
+  ['sqlcmd to the local server (allow)', 0, pwsh('sqlcmd -S localhost -d app -Q "SELECT 1"')],
+  ['redis-cli to another host (ask)', 'ask', bash('redis-cli -h cache.prod.internal')],
+  ['psql inside a compose container (allow)', 0, bash('docker compose exec db psql -h db -U app')],
+  ['psql with a connection string to another host (ask)', 'ask', bash('psql "host=db.prod.internal port=5432 dbname=app user=app sslmode=require"')],
+  ['psql with a local connection string (allow)', 0, bash('psql "host=localhost dbname=app"')],
+  ['pg_dump with a connection string as its database (ask)', 'ask', bash('pg_dump -d "host=db.prod.internal dbname=app"')],
+  ['psql with a variable named host (allow)', 0, bash('psql -v host=web1 -d app')],
+  ['psql after an exported PGHOST (ask)', 'ask', bash('export PGHOST=db.prod.internal && psql -d app')],
+  ['psql after a PowerShell PGHOST assignment (ask)', 'ask', pwsh('$env:PGHOST = "db.prod.internal"; psql -d app')],
+  ['psql naming localhost after an exported PGHOST (allow)', 0, bash('export PGHOST=db.prod.internal && psql -h localhost -d app')],
+  ['cloud-sql-proxy behind nohup, logged (ask)', 'ask', bash('nohup cloud-sql-proxy my-project:europe-west1:prod-db > proxy.log 2>&1 &')],
+  ['cloud-sql-proxy by its release asset name (ask)', 'ask', pwsh(`.${BS}cloud-sql-proxy.x64.exe my-project:europe-west1:prod-db`)],
+  ['cloud-sql-proxy as a docker image (ask)', 'ask', bash('docker run -d -p 5432:5432 gcr.io/cloud-sql-connectors/cloud-sql-proxy:2 my-project:europe-west1:prod-db')],
+  ['chmod of the downloaded proxy (allow)', 0, bash('chmod +x cloud-sql-proxy')],
+  ['gcloud compute start-iap-tunnel (ask)', 'ask', bash('gcloud compute start-iap-tunnel bastion 5432 --local-host-port=localhost:5432')],
+  ['docker run of a client image to another host (ask)', 'ask', bash('docker run --rm -it postgres:16 psql -h db.prod.internal -U app')],
+  ['docker run of a client image on a compose network (allow)', 0, bash('docker run --rm --network app_default postgres:16 psql -h db -U app')],
+  ['docker run of a database server named after its client (allow)', 0, bash('docker run --rm -d --name mongo -p 27017:27017 mongo:7')],
+  ['psql inside a pod of a local cluster (allow)', 0, bash('kubectl --context kind-dev exec -it deploy/api -- psql -h postgres -U app')],
+  ['mongoexport with a URI to another host (ask)', 'ask', bash('mongoexport --uri mongodb+srv://app@cluster0.example.net/app --collection orders')],
+  ['mongosh with a host:port address (ask)', 'ask', bash('mongosh db.prod.internal:27017/app')],
+  ['mongosh with a script file (allow)', 0, bash('mongosh app scripts/seed.js')],
+  ['sqlcmd with the server joined to -S (ask)', 'ask', pwsh('sqlcmd -Ssql.prod.internal -d app')],
+  ['Invoke-Sqlcmd to another server (ask)', 'ask', pwsh('Invoke-Sqlcmd -ServerInstance sql.prod.internal -Database app -Query "SELECT 1"')],
+
+  // A database's own data folder, outside the project too.
+  ['rm -rf of the system postgres data folder (ask)', 'ask', bash('sudo rm -rf /var/lib/postgresql/16/main')],
+  ['rm -rf of a pgdata bind mount (ask)', 'ask', bash('rm -rf /srv/compose/pgdata')],
+  ['Remove-Item of a Windows postgres data folder (ask)', 'ask', pwsh(`Remove-Item -Recurse "C:${BS}Program Files${BS}PostgreSQL${BS}16${BS}data"`)],
+  ['rm -rf of a scratch folder (allow)', 0, bash('rm -rf /tmp/build-cache')],
+  ['rm -rf of a Homebrew postgres folder (ask)', 'ask', bash('rm -rf /opt/homebrew/var/postgresql@16')],
+  ['git rm --cached of a pgdata folder, which only untracks it (allow)', 0, bash('git rm -r --cached pgdata')],
+  ['rm -rf of the folder PGDATA names (ask)', 'ask', bash('rm -rf "$PGDATA"')],
+  ["rm -rf of MongoDB's default data folder (ask)", 'ask', bash('rm -rf /data/db')],
+  ['rm -rf of a data/postgres bind mount (ask)', 'ask', bash('rm -rf ./data/postgres')],
+  ['rm of a source file under a folder named data/db (allow)', 0, bash('rm src/data/db/old-client.ts')],
+
+  // Shapes a review found read wrong.
+  ['psql to ::1 (allow)', 0, bash('psql -h ::1 -d app')],
+  ['redis-cli storing a URL as a value (allow)', 0, bash('redis-cli SET queue:url amqp://broker.internal/orders')],
+  ['pg_dump from another host (ask)', 'ask', bash('pg_dump -h db.prod.internal -U app app')],
+  ['manage.py migrate with a settings value before the app (allow)', 0, bash('python manage.py migrate --settings config.settings.test orders')],
+  ['manage.py migrate -v 2 one app (allow)', 0, bash('python manage.py migrate -v 2 orders')],
+  ['manage.py migrate --fake (ask)', 'ask', bash('python manage.py migrate --fake')],
+  ['compose down with a profile named migrate (allow)', 0, bash('docker compose --profile migrate down')],
+  ['golang-migrate force (ask)', 'ask', bash('migrate -path db/migrations -database "$DATABASE_URL" force 20240101')],
+  ['flask --app db downgrade base (ask)', 'ask', bash('flask --app app db downgrade base')],
+  ['flask --app db stamp (ask)', 'ask', bash('flask --app app db stamp head')],
+  ['dotnet ef database update with options and a target (ask)', 'ask', pwsh('dotnet ef database update --project src/Infra --startup-project src/Api InitialCreate')],
+  ['liquibase changelog-sync (ask)', 'ask', bash('liquibase changelog-sync')],
+  ["git diff excluding the env file (allow)", 0, bash("git diff -- . ':!.env'")],
+  ["git log -p excluding the env file (allow)", 0, bash("git log -p -- . ':(exclude).env'")],
+
   // What must not read as a command.
   ['grep for a forbidden command (allow)', 0, bash('grep -n "terraform apply" README.md')],
   ['grep behind xargs (allow)', 0, bash('git ls-files | xargs grep -n "kubectl apply"')],
@@ -459,13 +586,14 @@ function hookWith(values, target) {
 let failed = 0;
 let passed = 0;
 function run(part, hook, cases, cwd) {
-  // An optional fourth element is a pattern the refusal's text must match.
+  // An optional fourth element is a pattern the refusal's text must match - for an 'output' case, what the hook
+  // printed for the user.
   for (const [name, want, payload, says] of cases) {
     const input = payload.raw ?? JSON.stringify({ cwd, ...payload });
     const r = spawnSync(process.execPath, [hook], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } });
     const asked = /"permissionDecision":"ask"/.test(r.stdout ?? '');
     const got = r.status === 0 && asked ? 'ask' : r.status === 0 && (r.stdout ?? '').trim() ? 'output' : r.status;
-    const ok = got === want && (!says || says.test(r.stderr ?? ''));
+    const ok = got === want && (!says || says.test((want === 'output' ? r.stdout : r.stderr) ?? ''));
     if (ok) passed += 1;
     else failed += 1;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${part} ${name.padEnd(58)} ${String(got).padEnd(4)} ${(r.stderr ?? '').trim().slice(0, 50)}`);
@@ -597,6 +725,55 @@ try {
     ], project);
   }
 
+  // The Grep tool and git grep skip what git ignores, not what it tracks: a secret file in the index is read.
+  writeFileSync(join(project, '.gitignore'), '.env\n');
+  mkdirSync(join(project, 'config'), { recursive: true });
+  writeFileSync(join(project, 'config', 'local.settings.json'), '{}\n');
+  if (sample && committed && git('add', 'config/local.settings.json').status === 0) {
+    run('2', sample, [
+      ['Grep content over a folder with a tracked secret (deny)', 2, grep({ output_mode: 'content' })],
+      ['Grep content over the source folder (allow)', 0, grep({ path: join(project, 'app'), output_mode: 'content' })],
+      ['Grep file names over a tracked secret (allow)', 0, grep({ output_mode: 'files_with_matches' })],
+      ['Grep content with a glob that leaves it out (allow)', 0, grep({ glob: '*.py', output_mode: 'content' })],
+      ['Grep content with a type that leaves it out (allow)', 0, grep({ type: 'py', output_mode: 'content' })],
+      ['Grep content with a type that takes it (deny)', 2, grep({ type: 'json', output_mode: 'content' })],
+      ['Grep content with a path glob that leaves it out (allow)', 0, grep({ glob: 'app/**/*.py', output_mode: 'content' })],
+      ['Grep content with a path glob that takes it (deny)', 2, grep({ glob: 'config/**', output_mode: 'content' })],
+      ['Grep content with an exclude glob that misses it (deny)', 2, grep({ glob: '!tests/**', output_mode: 'content' })],
+      ['Grep content over a folder whose env file git ignores (allow)', 0, grep({ path: join(project, 'apps'), output_mode: 'content' })],
+      ['git grep over a tracked secret (deny)', 2, bash('git grep -n KEY')],
+      ['git grep -l over a tracked secret (allow)', 0, bash('git grep -l KEY')],
+      ['git grep with a pathspec that leaves it out (allow)', 0, bash("git grep -n KEY -- '*.py'")],
+      ['git grep with an exclude pathspec (allow)', 0, bash("git grep -n KEY -- . ':!config/local.settings.json'")],
+      // The secret lists read the whole path, wherever the search starts.
+      ["Grep content from inside the secret's folder (deny)", 2, grep({ path: join(project, 'config'), output_mode: 'content' })],
+      ["git grep from inside the secret's folder (deny)", 2, bash('git -C config grep -n KEY')],
+      // The tool's glob is a list, and every brace group counts.
+      ['Grep content with a glob list that takes it (deny)', 2, grep({ glob: '*.py,*.json', output_mode: 'content' })],
+      ['Grep content with a spaced glob list that takes it (deny)', 2, grep({ glob: '*.py *.json', output_mode: 'content' })],
+      ['Grep content with two brace groups that take it (deny)', 2, grep({ glob: '{app,config}/*.{py,json}', output_mode: 'content' })],
+      ['Grep content with a glob list that leaves it out (allow)', 0, grep({ glob: '*.py,*.sql', output_mode: 'content' })],
+      ['Grep content with an exclude glob that names it (allow)', 0, grep({ glob: '!local.settings.json', output_mode: 'content' })],
+      ['Grep content with an exclude glob for env files (allow)', 0, grep({ path: join(project, 'app'), glob: '!.env*', output_mode: 'content' })],
+    ], project);
+    // A file git neither tracks nor ignores is read by the Grep tool, not by git grep; a keystore is binary and is
+    // printed by neither, unless git grep is told to read it as text.
+    mkdirSync(join(project, 'notes'), { recursive: true });
+    mkdirSync(join(project, 'certs'), { recursive: true });
+    writeFileSync(join(project, 'notes', 'secrets.yaml'), 'KEY: placeholder\n');
+    writeFileSync(join(project, 'certs', 'test.jks'), 'KEY\n');
+    if (git('add', 'certs/test.jks').status === 0) {
+      run('2', sample, [
+        ['Grep content over an untracked secret git does not ignore (deny)', 2, grep({ path: join(project, 'notes'), output_mode: 'content' })],
+        ['git grep beside an untracked secret (allow)', 0, bash('git -C notes grep -n KEY')],
+        ['Grep content over a tracked keystore, which is binary (allow)', 0, grep({ path: join(project, 'certs'), output_mode: 'content' })],
+        ['git grep over a tracked keystore (allow)', 0, bash('git -C certs grep -n KEY')],
+        ['git grep -a over a tracked keystore (deny)', 2, bash('git -C certs grep -a -n KEY')],
+      ], project);
+    } else setupFailed('could not stage a keystore in the throwaway repo');
+    rmSync(join(project, 'notes'), { recursive: true, force: true });
+  } else if (committed) setupFailed('could not stage a secret file in the throwaway repo');
+
   // The same copy with a walk cap of 50 entries: past it the tree is unknown, and the user is asked.
   const capped = sample && join(scratch, 'capped.mjs');
   const cappedText = sample && readFileSync(sample, 'utf8').replace(/const WALK_CAP = \d+;/, 'const WALK_CAP = 50;');
@@ -642,6 +819,29 @@ try {
       ['psql DROP TABLE, lists unfilled (ask)', 'ask', bash('psql -d app -c "DROP TABLE users"')],
     ], project);
   }
+
+  // A misfilled list - broken JSON, a regex that does not compile - empties itself and is named; the rest holds.
+  const broken = hookWith({ ...SAMPLE, SECRET_RAW: '["config/local', FORBIDDEN_RAW: '["(unclosed"]' }, join(scratch, 'broken.mjs'));
+  if (committed && broken) {
+    run('3', broken, [
+      ['a broken secret list: cat .env still refused (deny)', 2, bash('cat .env'), /SECRET_PATHS is not a JSON array/],
+      ['a broken secret list protects nothing of its own, and tells the user (allow)', 'output', read(join(project, 'config', 'local.settings.json')), /"systemMessage":"backend-guard.mjs: SECRET_PATHS is not a JSON array/],
+      ['a broken forbidden list: terraform apply still refused (deny)', 2, bash('terraform apply'), /FORBIDDEN_COMMANDS is not a JSON array/],
+      ['a broken list beside it: the frozen list still holds (deny)', 2, edit(join(migrations, '001_init.sql'))],
+    ], project);
+  }
+
+  // A worktree in a folder the main repo ignores is a repo of its own: its own .gitignore decides, not a walk.
+  const tree = join(project, '.worktrees', 'feat');
+  if (sample && committed && git('worktree', 'add', '-q', tree).status === 0) {
+    writeFileSync(join(project, '.gitignore'), '.env\n.worktrees/\n');
+    writeFileSync(join(tree, '.gitignore'), '.env\n');
+    writeFileSync(join(tree, '.env'), 'KEY=placeholder\n');
+    run('2', sample, [
+      ['Grep content at the root of a worktree in an ignored folder (allow)', 0, grep({ path: tree, output_mode: 'content' })],
+      ['git grep in a worktree in an ignored folder (allow)', 0, bash('git grep -n KEY')],
+    ], tree);
+  } else if (committed) setupFailed('could not add a worktree in the throwaway repo');
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

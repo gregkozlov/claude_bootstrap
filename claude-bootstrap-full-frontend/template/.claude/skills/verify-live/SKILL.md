@@ -41,10 +41,10 @@ It lists every listener in the project's port range (`<DEV_PORT_RANGE>`) with th
 Then prove the marker from the shell, before touching the browser:
 
 ```bash
-curl -s -m 5 http://localhost:<port><DEV_BASE_PATH>__tree
+curl -sL -m 5 http://localhost:<port><DEV_BASE_PATH>__tree
 ```
 
-It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the bootstrap's README asked the project to add - `examples/tree-marker-plugin.ts` in the bootstrap repository is the Vite version). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` instead - ask the user to restart it.
+It answers `{"host","tree","branch","port"}` from the dev server process itself (the marker endpoint the bootstrap's README asked the project to add - `examples/tree-marker-plugin.ts` in the bootstrap repository is the Vite version, `examples/tree-marker-next-route.ts` the Next.js one). `host` must equal this machine's `hostname` and `tree` this tree's root; anything else, or no answer, means the server is not what step 2 said - stop and report. A server started before the marker landed answers with the app's `index.html` or a 404 page instead - ask the user to restart it.
 
 ## 3. Which browser - proved, not assumed
 

@@ -49,7 +49,7 @@ The units are:
 - each skill's `SKILL.md` plus its `references/*.md`;
 - `.claude/hooks/README.md`;
 - each `.claude/docs/*.md`;
-- every tracked README under `<SRC_DIR>/`.
+- every tracked README in a source folder - `<SRC_DIR>/` and the others (`git ls-files '*README*'`, generated ones left out).
 
 Run one `drift` in `section` mode per unit, in waves of **eight in parallel**. Each run lists only the claims that need action, and each prompt carries this run's decisions so far. Between waves, check and apply the returned pairs, so that the next wave reads the corrected text.
 

@@ -76,16 +76,16 @@ The extras, each at most once: a second `hunt` round when a fix is itself non-tr
 
 | Agent | Model | Effort | Set where |
 | --- | --- | --- | --- |
-| `hunt` | sonnet | medium | `.claude/agents/hunt.md` frontmatter |
-| `drift` | sonnet | medium | `.claude/agents/drift.md` frontmatter |
-| `Explore`, `general-purpose` | Claude Code's default in a task; Sonnet in upkeep | Claude Code's default | `maintain-ai-layer` passes `model: "sonnet"` |
+| `hunt` | sonnet | high | `.claude/agents/hunt.md` frontmatter |
+| `drift` | sonnet | high | `.claude/agents/drift.md` frontmatter |
+| `Explore`, `general-purpose` | Claude Code's default in a task; Sonnet in upkeep | Claude Code's default in a task; high in upkeep | `maintain-ai-layer` passes `model: "sonnet"` and `effort: "high"` |
 
-**Upkeep is the big launch bill.** Every agent `maintain-ai-layer` starts runs on Sonnet, and nothing runs until you type the command.
+**Upkeep is the big launch bill.** Every agent `maintain-ai-layer` starts runs on Sonnet at high effort, and nothing runs until you type the command.
 
 | Run | When | Launches |
 | --- | --- | --- |
 | the install | once | none - it runs in the main thread |
-| `init` | once after the install, again when the project has moved on | 4 survey agents (3 `Explore`, 1 `general-purpose`). With no rules yet, 1 `general-purpose` per area of up to ~250 source files, 1 for root config, 1 on the fix history and 1 per rule family (a rule and the sibling rules split off it). About 15 for a 1,000-file project. |
+| `init` | once after the install, again when the project has moved on | 4 survey agents (3 `Explore`, 1 `general-purpose` on the fix history). With no rules yet, 1 `general-purpose` per area of up to ~250 source files, 1 for root config and 1 per rule family (a rule and the sibling rules split off it). About 14 for a 1,000-file project. |
 | `deep` (the default once `CLAUDE.md` has no `[fill]` line left; until then a bare `/maintain-ai-layer` runs `init`) | about once a month - a session-start reminder tells you when | 1 `drift` per unit: 12 `CLAUDE.md` sections, each rule, 2 agents, 4 skills, the hooks README, each README in the source tree. Then 1 `general-purpose` per rule family, 4 for new-rule search, 2 for a workflow walk. About 35 with five rules. |
 | `rules` | when you ask | 1 `drift` per rule, 1 `general-purpose` per rule family, 4 for new-rule search |
 

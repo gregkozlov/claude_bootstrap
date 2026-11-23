@@ -159,10 +159,14 @@ function handleSessionStart(payload) {
 }
 
 async function handleStop(payload) {
-  if (payload.stop_hook_active === true) return null;
   const file = statePath(payload.session_id);
   const state = readState(file) ?? {};
   const key = treeKey();
+  if (payload.stop_hook_active === true) {
+    // The continuation may fix what the block named, unchecked: forget that failure, so its return blocks again.
+    if (state.lastFailure && key !== state.lastBlocked) writeState(file, { ...state, lastFailure: undefined });
+    return null;
+  }
   if (key && (key === state.baseline || key === state.lastPassed || key === state.lastBlocked)) return null;
 
   const { overran, code, output } = await runCheck();
@@ -171,15 +175,26 @@ async function handleStop(payload) {
   if (code === null) return { systemMessage: `Stop check could not run:\n${tail}\nNothing was verified.` };
   // The check may write an unignored file itself (a report, a cache): the tree it leaves is the one the next Stop sees.
   const checked = treeKey();
-  // With no tree key (no git, a git error) the failure's own output keys the block, digits masked so a duration or a
-  // clock line does not make the same failure new: it blocks once, and a pass in between re-arms it.
-  const blocked = checked ?? `no-git-${sha256(tail.replace(/\d+/g, '#'))}`;
   if (code === 0) {
-    writeState(file, checked ? { ...state, lastPassed: checked } : { ...state, lastBlocked: undefined });
+    writeState(file, { ...state, lastPassed: checked, lastBlocked: undefined, lastFailure: undefined });
     return null;
   }
-  if (!checked && blocked === state.lastBlocked) return null;
-  writeState(file, { ...state, lastBlocked: blocked });
+  // The failure's own output keys the block, with what two runs of the same failure print differently taken out:
+  // a runner's clock lines, a duration whatever its unit, every digit (a shifted line number), the order of the
+  // lines (parallel workers). So a check that was red before the session started, or one an edit left as it was,
+  // blocks once, not after every turn. A different failure blocks again, and so does the same one after a pass in
+  // between.
+  const failure = sha256(
+    output
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*(?:Duration|Start at|Time:|Done in)\s+\d/i.test(line))
+      .map((line) => line.replace(/\d+(?:\.\d+)?\s?(?:ms|s)\b/g, '#').replace(/\d+/g, '#').trim())
+      .filter(Boolean)
+      .sort()
+      .join('\n'),
+  );
+  writeState(file, { ...state, lastBlocked: checked, lastFailure: failure });
+  if (failure === state.lastFailure) return null;
   return {
     decision: 'block',
     reason: `"${CHECK}" failed:\n${tail}\n\nA failure in a file this task neither touched nor reaches is the owner's own edit or a parallel session's - say so instead of fixing it.`,

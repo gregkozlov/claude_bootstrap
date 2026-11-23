@@ -48,7 +48,7 @@ A candidate `references/settled.md` already answered is logged as settled.
 
 ## R5. Rules the code needs
 
-Cut the source folders into three areas of roughly equal file count (`git ls-files <source folders> | cut -d/ -f1-2 | sort | uniq -c`), generated code left out. Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), one per area, each told the unreached folders in its area first; and one `general-purpose` on the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only -- <source folders>` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared module or a migration, returned with the commits.
+Cut the source folders into three areas of roughly equal file count (`git ls-files <source folders> | cut -d/ -f1-2 | sort | uniq -c`), generated code left out. Launch four agents in parallel, read-only, as in R3: three `Explore` ("very thorough"), one per area, each told the unreached folders in its area first; and one `general-purpose` on the **fix history**: `git log --since=6.months --no-merges -i --grep='^fix' --format='%h %s' --name-only -- <source folders>` (the project's fix-commit prefix in `--grep`), each commit's diff read with `git show`, its defect class named, and the classes fixed twice, or once in a shared module or a migration, returned with the commits. The fourth is not launched when the caller already holds a fix-history answer (`init`'s I1): that answer stands in for it.
 
 Each prompt lists the layer files and asks for:
 
@@ -73,7 +73,7 @@ The rule count, the bytes, every changed rule's reach, `layer-refs` and `wc -c` 
 ## R7. No project rule: build the set
 
 1. **Survey.** `git ls-files` per top-level folder with counts, the stack from the build manifest, and the `CLAUDE.md` sections. Cut the code into areas of at most ~250 source files (a large folder by its subfolders), plus one for the migrations and schema files and one for the root config files.
-2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind - the move that keeps `CLAUDE.md` inside its budget.
+2. **Candidates.** One `general-purpose` agent per area, waves of eight, read-only as in R3, plus R5's fix-history agent - none when the caller already holds a fix-history answer (`init`'s I1), which the candidates get instead. Each returns the R5 asks, every candidate with its sites and the glob of the files it binds. `CLAUDE.md` text that only one area needs (a mechanic, or a prohibition about code in that area's files) is a candidate too: it moves into the rule, with no pointer left behind - the move that keeps `CLAUDE.md` inside its budget.
 3. **Filter** by R5's five conditions.
 4. **Cluster by audience:** one rule per set of files that needs the same text, named by its subject; R4's floor and split shape hold from the first draft.
 5. **Write** each rule by "Writing a rule", and measure its reach.
