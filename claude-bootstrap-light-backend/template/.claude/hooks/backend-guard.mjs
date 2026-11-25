@@ -5,21 +5,30 @@
 //   Edit / Write / MultiEdit   - a secret file; and a frozen file, one matching FROZEN_PATHS that is on the upstream
 //                                default branch (with no remote: that git tracks): a merged migration is never
 //                                edited, the change is a new migration.
-//   Bash / PowerShell          - a command that prints or copies a secret file, one that deletes or moves a frozen
-//                                file, and one that deploys, changes infrastructure or publishes (FORBIDDEN, plus the
-//                                project's own list). A command that destroys data (a rollback past one step and a
-//                                database's data folder included), rewrites the migration history, prints a secret
-//                                from a cluster or a cloud store, or reaches another host (a shell, a copy, a tunnel,
-//                                a database client) is not refused: the user is asked.
+//   Bash / PowerShell          - a command that prints, copies, uploads, deletes or moves a secret file, one that
+//                                deletes or moves a frozen file, and one that deploys, changes infrastructure or
+//                                publishes (FORBIDDEN, plus the project's own list). A command that destroys data (a
+//                                rollback past one step and a database's data folder included), rewrites the
+//                                migration history, prints a secret from a cluster or a cloud store, or reaches
+//                                another host (a shell, a copy, a tunnel, a database client) is not refused: the user
+//                                is asked.
 // It is a separate file so that guard.mjs stays the same file in every layer of this bootstrap.
 // Reads one JSON payload on stdin. Exit 2 with the reason on stderr blocks the call; exit 0 allows it; exit 0 with
 // a permissionDecision of "ask" on stdout hands the call to the user's permission prompt.
+// With `--harness codex` on its command line it reads OpenAI Codex's payloads instead - `Bash` whatever the shell,
+// `apply_patch` with the patch text - and answers with JSON on stdout, exit 0: there every question is a refusal
+// (Codex has no "ask"), a misfilled list refuses every call, and so does an interactive database session or console.
+// Every such branch tests CODEX; without the flag nothing changes, and no Claude Code layer registers it that way.
 // A backstop, never a security boundary: it reads the command text, so a script file that runs the same command,
 // or a value read from the process environment, walks past it. It allows whatever it cannot parse.
 // Self-test: node .claude/hooks/tests/backend-guard-test.mjs
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, writeSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+
+// The Codex switch: `--harness codex` or `--harness=codex`. Declared before the lists below are read.
+const CODEX = process.argv.slice(2).some((arg, index, args) => /^--harness=codex$/i.test(arg) || (arg === '--harness' && /^codex$/i.test(args[index + 1] ?? '')));
 
 // The three project lists, filled at install as JSON arrays of regex sources inside the raw strings (INSTALL.md);
 // edit freely afterwards. An unfilled placeholder and an empty string read as an empty list, and so does a misfilled
@@ -36,6 +45,7 @@ const FROZEN_RAW = String.raw`<FROZEN_PATHS>`;
 const SECRET_RAW = String.raw`<SECRET_PATHS>`;
 const FORBIDDEN_RAW = String.raw`<FORBIDDEN_COMMANDS>`;
 // Stderr on an allowed call reaches nobody, so a misfilled list is also told to the user (`systemMessage`, end of file).
+// Under Codex no message reaches anyone, so there the first misfilled list refuses every call instead.
 const listErrors = [];
 function regexList(name, raw, flags) {
   if (raw.startsWith('<') || !raw.trim()) return [];
@@ -45,8 +55,8 @@ function regexList(name, raw, flags) {
     return sources.map((source) => new RegExp(source, flags));
   } catch (error) {
     const message = `backend-guard.mjs: ${name} is not a JSON array of regex sources (${error.message}); it protects nothing until it is fixed.`;
-    listErrors.push(message);
-    process.stderr.write(`${message}\n`);
+    listErrors.push(CODEX ? `${name} is not a JSON array of regex sources (${error.message})` : message);
+    if (!CODEX) process.stderr.write(`${message}\n`);
     return [];
   }
 }
@@ -199,6 +209,8 @@ const FORBIDDEN = [
   rule('reveal', 'a value from a cloud secret store', tool('aws') + first('secretsmanager') + first(String.raw`(?:batch-)?get-secret-value`) + '|' + tool('aws') + first('ssm') + first(String.raw`get-parameter[\w-]*`) + String.raw`(?=.*\s--with-decryption(?=\s|$))`),
   rule('reveal', 'a value from a cloud secret store', tool('gcloud') + then(String.raw`secrets\s+versions\s+access`) + '|' + tool('az') + then(String.raw`keyvault\s+secret\s+(?:show|download)`)),
   rule('reveal', "the app's config vars", tool('heroku') + first(String.raw`config(?::get)?`)),
+  // A secret kept by a tool, decrypted or listed with its values.
+  rule('reveal', 'a secret store or an encrypted file', tool('dotnet') + first('user-secrets') + first('list') + '|' + tool('rails|rake') + then(String.raw`credentials:show`) + '|' + tool('sops') + then(String.raw`-d|--decrypt|decrypt`) + '|' + tool('vault') + first(String.raw`kv\s+get|read`) + '|' + tool('op') + first(String.raw`read|item\s+get`)),
 
   rule('data', 'compose down with its volumes', String.raw`(?<![\w.-])(?:docker|podman)(?:-|\s+)compose(?=\s)` + first('down') + String.raw`(?=.*\s(?:-v|--volumes)(?=\s|$))`),
   rule('data', 'a volume or system prune', tool('docker|podman') + String.raw`\s+(?:volume\s+(?:rm|prune)|system\s+prune)(?=\s|$)`),
@@ -462,9 +474,21 @@ const READERS = new Set([
   'hexdump', 'format-hex', 'base64', 'type', 'get-content', 'gc', 'import-csv', 'grep', 'egrep', 'fgrep', 'rg', 'ag',
   'ack', 'findstr', 'select-string', 'sls', 'sed', 'gsed', 'awk', 'gawk', 'cut', 'sort', 'uniq', 'diff', 'cmp', 'jq',
   'yq', 'dd', 'tar', 'cp', 'copy', 'copy-item', 'cpi', 'scp', 'rsync', 'mv', 'move', 'move-item',
+  // An archive, a recoding, a split or a Windows copier copies it.
+  'compress-archive', 'zip', '7z', '7za', 'gzip', 'bzip2', 'xz', 'zstd', 'comm', 'join', 'iconv', 'pr', 'fold', 'fmt',
+  'expand', 'split', 'perl', 'ruby', 'xcopy', 'robocopy',
 ]);
+// Two readers only by their verb: `certutil -encode` (not `-hashfile`), `openssl base64` / `enc` (not `genrsa`).
+const readsByVerb = (name, words, at) =>
+  (name === 'certutil' && words.some((word) => /^[-/](?:encode|decode|encodehex|dump)$/i.test(word))) || (name === 'openssl' && /^(?:base64|enc)$/.test(words[at + 1] ?? ''));
+// The upload tools read only the file they send - a value spelled `@file` or `<file`, the value of -T and its kin, a
+// `-Form` entry; a URL, a header or a client certificate (`--cert`, `--key`) is none.
+const UPLOADERS = new Set(['curl', 'wget', 'http', 'xh', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm']);
+const UPLOAD_FILE = /^(?:-T|--upload-file|--post-file|--body-file|-InFile)$/i;
 // Their first plain argument is a pattern or a script, never a path: `grep "\.env" src` searches for a string.
-const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls', 'sed', 'gsed', 'awk', 'gawk', 'jq', 'yq']);
+const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls', 'sed', 'gsed', 'awk', 'gawk', 'jq', 'yq', 'perl', 'ruby']);
+// An option whose next word is a filter, a pattern or a name, never a path read: a wildcard after it is not expanded.
+const VALUE_OPTION = /^(?:-[gtvexdso]|--i?glob|--include|--exclude(?:-dir)?|--type|--regexp|--expression|--delimiter|--separator|--output|-i?name|-i?path|-i?wholename|-i?regex|-Filter|-Include|-Exclude|-Pattern)$/i;
 // Their last plain argument is where the copy lands, not what is read.
 const COPIERS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'scp', 'rsync', 'mv', 'move', 'move-item']);
 const GREPS = new Set(['grep', 'egrep', 'fgrep']);
@@ -521,13 +545,44 @@ const MAX_DEPTH = 3;
 const RULE = 'CLAUDE.md, Data, secrets and the outside world';
 
 function deny(reason) {
+  if (CODEX) {
+    const said = codexWording(reason);
+    try {
+      writeSync(1, `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: said } })}\n`);
+    } catch {
+      // Stdout is gone: exit 2 with the reason on stderr is Codex's second refusal form, where the hook's shell keeps the code.
+      process.stderr.write(`${said}\n`);
+      process.exit(2);
+    }
+    process.exit(0);
+  }
   process.stderr.write(`${reason}\n`);
   process.exit(2);
 }
 
-// A refusal anywhere in the call outranks a question, so the question waits until the whole call was read.
+// The refusals are written once, in Claude Code's words; under Codex the same sentence names that tool's files, and
+// a search is sent to `git grep` alone - there is no Grep tool there.
+function codexWording(reason) {
+  return reason
+    .split('.claude/hooks/backend-guard.mjs')
+    .join('.codex/hooks/backend-guard.mjs')
+    .split('CLAUDE.md')
+    .join('AGENTS.md')
+    .split('search with the Grep tool or `git grep`, which skip ignored files')
+    .join('search with `git grep`, which skips ignored files');
+}
+
+// A refusal anywhere in the call outranks a question, so the question waits until the whole call was read. Codex
+// has no question: there the same kinds are refused, each with what the user can do instead.
 let question = '';
-const QUESTION = {
+const CODEX_QUESTION = {
+  data: (label) => `Blocked by .claude/hooks/backend-guard.mjs: this command ${KIND.data} (${label}). ${RULE}: a database is wiped only when the user asked for exactly that. If they did, name the command and the database it points at, and they run it in their own terminal.`,
+  reveal: (label) => `Blocked by .claude/hooks/backend-guard.mjs: this command prints secret values (${label}). ${RULE}: a secret is never read or printed. If the user needs the value, they read it in their own terminal.`,
+  large: (label) => `Blocked by .claude/hooks/backend-guard.mjs: a search over ${label} - the tree is too large to check for secret files. ${RULE}: name the folders to search, exclude what it must not read, or search the tracked files with \`git grep\`.`,
+  remote: (label) => `Blocked by .claude/hooks/backend-guard.mjs: this command reaches another machine (${label}). ${RULE}: nothing the agent runs leaves the machine unasked. If the user asked for exactly this, name the command and the host, and they run it in their own terminal.`,
+  history: (label) => `Blocked by .claude/hooks/backend-guard.mjs: this command rewrites the record of which migrations ran (${label}). ${RULE}: a merged migration is never changed. If the user asked for exactly that, name the command, and they run it in their own terminal.`,
+};
+const QUESTION = CODEX ? CODEX_QUESTION : {
   data: (label) => `backend-guard: this command ${KIND.data} (${label}). ${RULE}: a database is wiped only when you asked for exactly that - approve it if you did, and check which database it points at first.`,
   reveal: (label) => `backend-guard: this command prints secret values (${label}). ${RULE}: a secret is never read or printed - approve it only if you asked for exactly that.`,
   large: (label) => `backend-guard: a search over ${label} - the tree is too large to check for secret files; name the folders or exclude what it must not read. ${RULE}: approve it only if no env file or key sits under it.`,
@@ -545,8 +600,19 @@ async function readStdin() {
 }
 
 const normalized = (value) => String(value).replace(/\\/g, '/').replace(/\/+$/, '');
-const isSecret = (value) => SECRET_PATHS.some((pattern) => pattern.test(normalized(value)));
-const isFrozenPath = (value) => FROZEN_PATHS.some((pattern) => pattern.test(normalized(value)));
+// Windows opens `.env.`, `.env ` and `.env::$DATA` as `.env`: the last name also counts without trailing dots and
+// spaces and without an NTFS stream suffix (a drive's colon is not one).
+function spellings(value) {
+  const flat = normalized(value);
+  const at = flat.lastIndexOf('/');
+  const name = flat.slice(at + 1);
+  const plain = (at === -1 && /^[A-Za-z]:/.test(name) ? name.slice(0, 2) + name.slice(2).replace(/:.*$/, '') : name.replace(/:.*$/, '')).replace(/[. ]+$/, '');
+  return plain && plain !== name && !/^\.*$/.test(name) ? [flat, flat.slice(0, at + 1) + plain] : [flat];
+}
+const isSecret = (value) => spellings(value).some((form) => SECRET_PATHS.some((pattern) => pattern.test(form)));
+const isFrozenPath = (value) => spellings(value).some((form) => FROZEN_PATHS.some((pattern) => pattern.test(form)));
+// The spelling git and the file system agree on, for the frozen check's `git ls-files`.
+const plainSpelling = (value) => spellings(value).at(-1);
 const commandName = (word) => normalized(word).split('/').pop().toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '');
 
 // A glob names files too: `.env*` reaches the env file. Wildcards are dropped and one brace group is expanded.
@@ -556,11 +622,18 @@ function reaches(value) {
   return forms.some((form) => isSecret(form) || isSecret(form.replace(/[*?]+/g, '').replace(/\.+$/, '')));
 }
 
+// The same, and the path as it resolves from the call's folder: a project entry such as `config/local\.settings\.json$`
+// holds for `cat local.settings.json` run inside `config`.
+const reachesFrom = (value, cwd) => reaches(value) || (!WILD.test(value) && /[\w.]/.test(value) && isSecret(absolute(value, cwd)));
+
 // Git Bash spells a drive as /d/...; Node on Windows would read that as a folder named "d".
 function absolute(target, cwd) {
   const native = process.platform === 'win32' ? target.replace(/^\/([A-Za-z])\//, '$1:/') : target;
   return path.resolve(cwd, native);
 }
+
+// A home folder by its shell spelling, for a wildcard that is listed on disk: `~/.aws/cred*`, `$env:USERPROFILE\...`.
+const homeExpanded = (target) => target.replace(/^(?:~|\$HOME|\$\{HOME\}|\$env:(?:USERPROFILE|HOME)|%USERPROFILE%)(?=[\\/]|$)/i, () => os.homedir());
 
 const git = (cwd, args, input) =>
   execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'ignore'], timeout: 5000 });
@@ -582,7 +655,7 @@ function upstreamRef(dir) {
 // remote, every tracked one counts - the agent neither commits nor stages, so what git tracks the owner put there.
 // Any failure - no repo, a folder that does not exist - reads as "none", which allows the call.
 function frozenAt(target, cwd) {
-  const file = absolute(target, cwd);
+  const file = absolute(plainSpelling(target), cwd);
   const dir = path.dirname(file);
   try {
     const tracked = git(dir, ['ls-files', '-z', '--full-name', '--', `${FOLD ? ':(icase)' : ''}${normalized(file)}`]).split('\0').filter((name) => name && isFrozenPath(`/${name}`));
@@ -602,6 +675,12 @@ function secretRefusal(target, how) {
   );
 }
 
+function secretDeleteRefusal(target) {
+  deny(
+    `Blocked by .claude/hooks/backend-guard.mjs: ${target} is a secret file (SECRET_PATHS) and this call would delete or move it. ${RULE}: a secret file holds values only the owner has - say what should change, and the owner does it.`,
+  );
+}
+
 function frozenRefusal(target, how) {
   deny(
     `Blocked by .claude/hooks/backend-guard.mjs: ${target} is a merged migration (FROZEN_PATHS) and this call would ${how} it. ${RULE}: other environments have already applied it - write a new migration instead. If it was never applied anywhere, the owner changes it.`,
@@ -614,7 +693,9 @@ function checkRead(target) {
 
 function checkWrite(target, cwd) {
   if (typeof target !== 'string' || !target) return;
-  if (isSecret(target)) secretRefusal(target, 'write');
+  // The absolute path too: a project entry such as `config/local\.settings\.json$` holds for a relative path given
+  // from inside `config`.
+  if (isSecret(target) || isSecret(absolute(target, cwd))) secretRefusal(target, 'write');
   // The path test first: it is free, and git is then asked about migration files only.
   if (isFrozenPath(absolute(target, cwd)) && frozenAt(target, cwd)) frozenRefusal(target, 'edit');
 }
@@ -626,14 +707,16 @@ function checkStdinSql(client, sql) {
   if (SQL_CLIENT.test(client) && SQL_WIPE.test(statement)) ask("SQL on a database client's stdin");
 }
 
-// A heredoc body is data unless a shell reads it: `cat > notes.txt <<EOF` may quote any command.
+// A heredoc body is data unless a shell reads it: `cat > notes.txt <<EOF` may quote any command. A `<<` inside quotes
+// on its line (`echo '<<END'`) opens nothing.
 function withoutHeredocs(command) {
   const lines = command.split(/\r?\n/);
   const kept = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     kept.push(line);
-    const here = /<<-?\s*(['"]?)([A-Za-z_][\w.-]*)\1/.exec(line.replace(/<<</g, '   '));
+    const open = line.replace(/<<</g, '   ').replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (quoted) => ' '.repeat(quoted.length)).indexOf('<<');
+    const here = open === -1 ? null : /^<<-?\s*(['"]?)([A-Za-z_][\w.-]*)\1/.exec(line.slice(open));
     if (!here || SHELL_HEREDOC.test(line)) continue;
     const end = lines.findIndex((candidate, at) => at > index && candidate.trim() === here[2]);
     if (end === -1) continue;
@@ -641,6 +724,61 @@ function withoutHeredocs(command) {
     index = end;
   }
   return kept.join('\n');
+}
+
+// PowerShell has no heredoc; its here-string is `@'` or `@"` ending a line outside a quote and a comment, closed by
+// `'@` or `"@` at the start of a later line (no blank may come before it). Each becomes one single-quoted word, so an
+// apostrophe or a quote inside no longer unbalances the rest of the command; what it is piped into is judged below.
+// A `@"` body's `$(...)` runs, so it is checked as a command first. An opener with no closer changes nothing.
+function hereStringsQuoted(command, cwd, depth) {
+  let out = '';
+  let quote = '';
+  let comment = '';
+  for (let index = 0; index < command.length; index += 1) {
+    const ch = command[index];
+    if (comment) {
+      out += ch;
+      if (comment === '#' ? ch === '\n' : ch === '>' && command[index - 1] === '#') comment = '';
+      continue;
+    }
+    if (quote) {
+      out += ch;
+      if (quote === '"' && ch === '`' && index + 1 < command.length) {
+        index += 1;
+        out += command[index];
+      } else if (ch === quote) quote = '';
+      continue;
+    }
+    const mark = command[index + 1];
+    if (ch === '@' && (mark === "'" || mark === '"')) {
+      const lineEnd = command.indexOf('\n', index + 2);
+      const close = lineEnd === -1 ? -1 : command.indexOf(`\n${mark}@`, lineEnd);
+      if (close !== -1 && /^[ \t]*\r?$/.test(command.slice(index + 2, lineEnd))) {
+        const body = command.slice(lineEnd + 1, close).replace(/\r$/, '');
+        if (mark === '"') {
+          for (const inner of withoutSubstitutions(body, 'PowerShell').bodies) {
+            if (depth < MAX_DEPTH) checkCommand(inner, 'PowerShell', cwd, depth + 1);
+            else tooDeep();
+          }
+        }
+        // Its line breaks are kept around the body, so even a one-line body is a quoted word with a break in it: text,
+        // never the head of a command.
+        out += `'\n${body.replace(/'/g, "''")}\n'`;
+        index = close + 2;
+        continue;
+      }
+    }
+    if (ch === '#' && (index === 0 || /[\s;|&(){}]/.test(command[index - 1]))) comment = '#';
+    else if (ch === '<' && mark === '#') comment = '<#';
+    else if (ch === "'" || ch === '"') quote = ch;
+    out += ch;
+  }
+  return out;
+}
+
+// Under Codex a body nested deeper than this hook reads is refused, not passed unread.
+function tooDeep() {
+  if (CODEX) deny('Blocked by .claude/hooks/backend-guard.mjs: this command nests one shell in another deeper than this guard reads, so it cannot be judged. Run the inner command itself.');
 }
 
 // Pulls `$(...)` and backtick bodies out of the command: each is a command of its own, wherever it sits.
@@ -719,11 +857,14 @@ function segmentsOf(command, shell) {
   };
   // What stood between two segments; a single `|` makes the second one read the first one's output (`piped`).
   let joint = '';
+  // Whether the segment reads a `<` redirect or a heredoc: then nothing is typed into what it runs.
+  let stdin = false;
   const endSegment = (by = '') => {
     endWord();
     if (words.length) {
       words.piped = /^\)?\|$/.test(joint.replace(/\s/g, ''));
       words.redirected = redirected;
+      words.stdin = stdin;
       segments.push(words);
       joint = '';
     }
@@ -731,6 +872,7 @@ function segmentsOf(command, shell) {
     words = [];
     redirected = new Set();
     redirect = false;
+    stdin = false;
   };
   for (let index = 0; index < command.length; index += 1) {
     const ch = command[index];
@@ -762,6 +904,7 @@ function segmentsOf(command, shell) {
       }
       endWord();
       redirect = true;
+      if (ch === '<') stdin = true;
     } else if (/\s/.test(ch)) endWord();
     else {
       word += ch;
@@ -778,11 +921,72 @@ function braceForms(glob) {
   return brace ? brace[2].split(',').flatMap((part) => braceForms(brace[1] + part + brace[3])) : [glob];
 }
 
+// A glob as a list of tokens - `*`, `?`, a `[...]` class (`!` or `^` negates it; one with no closing `]` is a plain
+// `[`), a literal - matched by a table, never a regex: a regex built from a glob can backtrack past the hook's timeout
+// or throw, and either lets the call through. `paths`: `*` and `?` stop at `/`, and `**/` / `**` cross it.
+function globMatcher(glob, fold, paths = false) {
+  const tokens = [];
+  for (let index = 0; index < glob.length; index += 1) {
+    const ch = glob[index];
+    if (paths && glob.startsWith('**/', index)) {
+      tokens.push({ kind: 'dirs' });
+      index += 2;
+    } else if (ch === '*') {
+      const cross = !paths || glob[index + 1] === '*';
+      while (glob[index + 1] === '*') index += 1;
+      if (tokens.at(-1)?.kind !== 'star' || tokens.at(-1).cross !== cross) tokens.push({ kind: 'star', cross });
+    } else if (ch === '?') tokens.push({ kind: 'one' });
+    else if (ch === '[' && glob.indexOf(']', index + 2) !== -1) {
+      const close = glob.indexOf(']', index + 2);
+      let body = glob.slice(index + 1, close);
+      const negate = /^[!^]/.test(body);
+      if (negate) body = body.slice(1);
+      const ranges = [];
+      for (let at = 0; at < body.length; at += 1) {
+        if (body[at + 1] === '-' && at + 2 < body.length) {
+          ranges.push([body[at], body[at + 2]]);
+          at += 2;
+        } else ranges.push([body[at], body[at]]);
+      }
+      tokens.push({ kind: 'class', negate, ranges });
+      index = close;
+    } else tokens.push({ kind: 'char', ch });
+  }
+  const same = (a, b) => (fold ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const inClass = (token, ch) => {
+    const hit = token.ranges.some(([low, high]) => (fold ? [ch.toLowerCase(), ch.toUpperCase()] : [ch]).some((c) => c >= low && c <= high));
+    return token.negate ? !hit : hit;
+  };
+  return (text) => {
+    // reach[j]: the tokens so far can match the first j characters.
+    let reach = new Array(text.length + 1).fill(false);
+    reach[0] = true;
+    for (const token of tokens) {
+      const next = new Array(text.length + 1).fill(false);
+      let any = false;
+      for (let j = 0; j <= text.length; j += 1) {
+        const ch = text[j - 1];
+        if (token.kind === 'star') {
+          next[j] = reach[j] || (j > 0 && next[j - 1] && (token.cross || ch !== '/'));
+        } else if (token.kind === 'dirs') {
+          // `any`: the tokens so far matched some shorter prefix, so this `/` can close a run of folders after it.
+          next[j] = reach[j] || (j > 0 && ch === '/' && any);
+          any ||= reach[j];
+        } else if (j > 0 && reach[j - 1]) {
+          next[j] = token.kind === 'one' ? !paths || ch !== '/' : token.kind === 'class' ? (!paths || ch !== '/') && inClass(token, ch) : same(token.ch, ch);
+        }
+      }
+      reach = next;
+    }
+    return reach[text.length];
+  };
+}
+
 // A glob as grep's --include / --exclude reads it, against a base name; brace groups are expanded. PowerShell
 // and findstr match a name whatever its case ('i').
 function globTest(glob, flags = '') {
-  const patterns = braceForms(glob).map((form) => new RegExp(`^${form.replace(/[.+^$(){}|\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, flags));
-  return (name) => patterns.some((pattern) => pattern.test(name));
+  const matchers = braceForms(glob).map((form) => globMatcher(form, flags.includes('i')));
+  return (name) => matchers.some((matches) => matches(name));
 }
 
 // A glob as ripgrep and the Grep tool read it: one without a slash against the file name, one with a slash against
@@ -790,11 +994,8 @@ function globTest(glob, flags = '') {
 // path form answers `unknown`.
 function rgGlobTest(glob, unknown) {
   if (!glob.includes('/')) return globTest(glob);
-  const token = { '**/': '(?:.*/)?', '**': '.*', '*': '[^/]*', '?': '[^/]' };
-  const patterns = braceForms(glob).map(
-    (form) => new RegExp(`^${form.replace(/^\//, '').replace(/[.+^$()|\\]/g, '\\$&').replace(/\*\*\/|\*\*|\*|\?/g, (match) => token[match])}$`),
-  );
-  return (name, relative) => (relative === undefined ? unknown : patterns.some((pattern) => pattern.test(relative)));
+  const matchers = braceForms(glob).map((form) => globMatcher(form.replace(/^\//, ''), false, true));
+  return (name, relative) => (relative === undefined ? unknown : matchers.some((matches) => matches(relative)));
 }
 
 // A ripgrep file type as the extensions it takes, for the types a secret file can carry.
@@ -1085,6 +1286,101 @@ function powershellWalks(words, from, lister) {
   });
 }
 
+// The files a segment is handed by the one piping into it, when it reads or removes each of them: a PowerShell listing
+// or item (`gi .env | gc`, `gci | Remove-Item`; no operand is the folder itself) into a cmdlet that takes them, and
+// under xargs the names `echo` or `printf` prints or the files `ls` lists (`echo .env | xargs cat`). `psTakes` names
+// the cmdlets that read or remove what they are piped, `xargsTakes` the commands xargs hands the names to.
+const PS_FEEDERS = new Set([...PS_LISTERS, 'get-item', 'gi', 'resolve-path', 'rvpa']);
+const PS_FED_READERS = new Set(['get-content', 'gc', 'type', 'cat', 'format-hex', 'copy-item', 'cpi', 'import-csv', 'compress-archive']);
+const PS_FED_REMOVERS = new Set(['remove-item', 'ri', 'del', 'erase', 'rm', 'rmdir', 'rd', 'move-item', 'mi', 'mv', 'move', 'rename-item', 'rni', 'clear-content', 'clc']);
+function fedWalks(words, names, at, feed, psTakes, xargsTakes, shell) {
+  if (!feed) return [];
+  const feedNames = feed.map(commandName);
+  const feedAt = commandAt(feed, feedNames);
+  const xargs = names.slice(0, at).includes('xargs');
+  // Only PowerShell pipes objects: under Bash `ls | cat` prints the names.
+  if (shell === 'PowerShell' && PS_FEEDERS.has(feedNames[feedAt]) && psTakes.has(names[at]) && !xargs) return powershellWalks(feed, feedAt, true);
+  if (!xargs || !xargsTakes.has(names[at])) return [];
+  const operands = feed.slice(feedAt + 1).filter((word) => !word.startsWith('-'));
+  // A printed name is that one path: a folder named so hands on no file of its own.
+  if (/^(?:echo|printf|write-output)$/.test(feedNames[feedAt])) return operands.map((folder) => ({ folder, filters: { ...noFilters(), name: () => false } }));
+  if (feedNames[feedAt] !== 'ls') return [];
+  const flags = feed.slice(feedAt + 1).filter((word) => /^-[A-Za-z]+$/.test(word)).join('');
+  const filters = { ...noFilters(), depth: /R/.test(flags) ? Infinity : 0, exclude: /[aA]/.test(flags) ? [] : [(name) => name.startsWith('.')] };
+  return (operands.length ? operands : ['.']).flatMap((target) => {
+    const spot = folderAndName(target);
+    if (spot && WILD.test(spot.name)) return [{ folder: spot.folder, filters: { ...filters, name: globTest(spot.name) } }];
+    return [{ folder: target, filters }];
+  });
+}
+
+// A copy or an archive that takes a whole folder takes the secret files in it: `tar -czf b.tgz .`, `zip -r b.zip config`,
+// `Compress-Archive -Path config ...`, `Copy-Item -Recurse config x`, `cp -r . /tmp/bk`, `robocopy . x /E`. Each folder it
+// is handed is walked, past what its own exclusions leave out (`--exclude`, zip's `-x`, robocopy's `/XF`); the archive
+// file and the destination are not sources.
+function checkFolderCopy(words, names, reader, destination, cwd) {
+  const name = names[reader];
+  if (!/^(?:cp|copy|copy-item|cpi|rsync|zip|tar|7z|7za|compress-archive|robocopy|xcopy)$/.test(name)) return;
+  const rest = words.slice(reader + 1);
+  const recursive = rest.some((word) => /^(?:-[A-Za-z]*[rRa][A-Za-z]*|--recursive|--archive|-Recurse|\/[se])$/i.test(word));
+  const tarCreates = name === 'tar' && rest.some((word) => /^-?[A-Za-z]*c[A-Za-z]*$/.test(word) || word === '--create');
+  const whole = tarCreates || name === 'compress-archive' || name === 'robocopy' || (/^(?:7z|7za)$/.test(name) && rest[0] === 'a') || recursive;
+  if (!whole) return;
+  // A switch: `-x`, and for the Windows copiers `/E` - elsewhere a word opening with `/` is an absolute path.
+  const isSwitch = (word) => word.startsWith('-') || (/^(?:robocopy|xcopy)$/.test(name) && /^\/[A-Za-z]+(?::.*)?$/.test(word));
+  const skip = new Set([destination]);
+  const exclude = [];
+  for (let index = reader + 1; index < words.length; index += 1) {
+    const word = words[index];
+    const joined = /^--exclude=(.+)$/.exec(word);
+    if (joined) exclude.push(globTest(joined[1]));
+    else if (/^(?:--exclude|\/XF|\/XD)$/i.test(word) || (name === 'zip' && word === '-x')) {
+      for (index += 1; index < words.length && !isSwitch(words[index]); index += 1) {
+        exclude.push(globTest(words[index].replace(/^.*[\\/]/, '')));
+        skip.add(index);
+      }
+      index -= 1;
+    } else if (/^(?:-f|--file|-DestinationPath)$/i.test(word) || (tarCreates && /^-?[A-Za-z]*f$/.test(word) && !word.startsWith('--'))) skip.add(index + 1);
+  }
+  // zip's and 7z's first plain word is the archive they write.
+  const plain = words.flatMap((word, index) => (index > reader && !isSwitch(word) && !skip.has(index) && !(/^7za?$/.test(name) && word === 'a') ? [index] : []));
+  if (/^(?:zip|7z|7za)$/.test(name)) plain.shift();
+  // robocopy names its source, its destination, then file names.
+  if (name === 'robocopy') plain.splice(1);
+  for (const index of plain) {
+    const folder = absolute(homeExpanded(words[index]), cwd);
+    try {
+      if (!statSync(folder).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const depth = name === 'robocopy' && !rest.some((word) => /^\/[se]$/i.test(word)) ? 0 : Infinity;
+    const secret = secretUnder(folder, { ...noFilters(), exclude, depth });
+    if (secret === TOO_LARGE) ask(normalized(words[index]), 'large');
+    else if (secret) secretRefusal(`${words[index]} (${normalized(path.relative(cwd, secret))})`, 'print or copy');
+  }
+}
+
+// A wildcard the shell expands before the command runs reaches the secret files it names on disk: `cat .e*`,
+// `gc config/*`. Its folder is listed once; under Bash a wildcard opening the name does not take a dot file.
+function globSecret(word, cwd, shell) {
+  const spot = folderAndName(homeExpanded(word));
+  if (!spot || !WILD.test(spot.name)) return '';
+  let entries;
+  try {
+    entries = readdirSync(absolute(spot.folder, cwd));
+  } catch {
+    return '';
+  }
+  const matches = globMatcher(spot.name, shell === 'PowerShell' || FOLD);
+  for (const entry of entries.slice(0, WALK_CAP)) {
+    if (shell !== 'PowerShell' && entry.startsWith('.') && !spot.name.startsWith('.')) continue;
+    const full = path.join(absolute(spot.folder, cwd), entry);
+    if (isSecret(full) && matches(entry)) return full;
+  }
+  return '';
+}
+
 // What a `find` hands to the command it runs or pipes into: the folders it starts from, narrowed by its -name
 // tests and -maxdepth. Nothing where it lists folders only, or where a -path or -regex test picks the files -
 // the walk cannot follow those.
@@ -1114,7 +1410,7 @@ function findWalks(words, at) {
 // `findstr /s`, a wildcard handed to findstr or Select-String, a file listing piped into Select-String (`feed` is
 // the segment that pipes into this one), a `find` that hands its files to a reader. Each is walked the way the
 // command reads, and refused unless its own filters keep every secret file out.
-function checkSearch(words, names, reader, cwd, feed) {
+function checkSearch(words, names, reader, cwd, feed, shell) {
   const walks = [];
   if (GREPS.has(names[reader]) && words.some((word) => RECURSIVE.test(word))) walks.push(...grepWalks(words, reader));
   else if (names[reader] === 'rg') walks.push(...ripgrepWalks(words, reader));
@@ -1126,8 +1422,11 @@ function checkSearch(words, names, reader, cwd, feed) {
   if (names[at] === 'find' && words.some((word, index) => FIND_RUNS.test(word) && READERS.has(names[index + 1]))) walks.push(...findWalks(words, at));
   else if (feedNames[feedAt] === 'find' && READERS.has(names[at]) && names.slice(0, at).includes('xargs')) walks.push(...findWalks(feed, feedAt));
   else if (PS_LISTERS.has(feedNames[feedAt]) && PS_SEARCHERS.has(names[reader])) walks.push(...powershellWalks(feed, feedAt, true));
+  else if (reader === at) walks.push(...fedWalks(words, names, at, feed, PS_FED_READERS, READERS, shell));
   for (const { folder, filters } of walks) {
-    const secret = secretUnder(absolute(folder, cwd), filters);
+    // A walk that starts at a file reads that file.
+    if (reaches(folder)) secretRefusal(folder, 'print or copy');
+    const secret = secretUnder(absolute(homeExpanded(folder), cwd), filters);
     if (secret === TOO_LARGE) ask(folder, 'large');
     else if (secret) {
       deny(
@@ -1161,16 +1460,65 @@ function removed(words, names) {
   return [];
 }
 
-function checkSegment(words, shell, cwd, depth, feed) {
+// What a mover removes is its sources, never where it moves them to: `mv .env.example .env` takes no secret away.
+const MOVERS = new Set(['mv', 'move', 'move-item', 'mi', 'ren', 'rename-item', 'rni']);
+function removedSources(words, names) {
+  // A filter's value names what is kept or picked, never a path removed by name: `Remove-Item app\* -Exclude .env`.
+  const list = removed(words, names).filter((word, index, all) => !/^-(?:Exclude|Include|Filter)$/i.test(all[index - 1] ?? ''));
+  const verb = names.findIndex((name, index) => index >= commandAt(words, names) && REMOVERS.has(name));
+  if (!MOVERS.has(names[verb] ?? '')) return list;
+  const sources = list.filter((word, index) => !/^-(?:Destination|Dest|NewName)$/i.test(list[index - 1] ?? '') && !/^-(?:Destination|Dest|NewName)$/i.test(word));
+  const plain = sources.flatMap((word, index) => (word.startsWith('-') ? [] : [index]));
+  return list.some((word) => /^-(?:Destination|Dest|NewName)$/i.test(word)) ? sources : sources.filter((_, index) => index !== plain.at(-1));
+}
+
+// The words a block or a keyword wraps around a command - `{ rm x; }`, `1 | % { ... }`, `if (...) { ... }`, `then psql`
+// - are dropped before a segment is judged, so the command inside is judged as if it were typed alone.
+const BLOCK_WORD = /^(?:\{|\}|\.|%|foreach-object|invoke-command|icm|if|then|else|elif|do|while|until|try|finally)$/i;
+function unwrapped(words) {
+  let start = 0;
+  let end = words.length;
+  while (start < end && BLOCK_WORD.test(words[start])) start += 1;
+  while (end > start && words[end - 1] === '}') end -= 1;
+  const opened = words.slice(0, start).includes('{') || /^\{./.test(words[start] ?? '');
+  if (start === 0 && end === words.length && !opened) return words;
+  const kept = [];
+  kept.redirected = new Set();
+  for (let index = start; index < end; index += 1) {
+    if (words.redirected?.has(index)) kept.redirected.add(kept.length);
+    kept.push(words[index]);
+  }
+  if (/^\{./.test(kept[0] ?? '')) kept[0] = kept[0].slice(1);
+  // A brace glued to the last word closes the block it opened: `% { gc .env}`.
+  if (opened && /[^{]\}$/.test(kept.at(-1) ?? '')) kept[kept.length - 1] = kept.at(-1).slice(0, -1);
+  kept.piped = words.piped;
+  kept.stdin = words.stdin;
+  return kept;
+}
+
+// PowerShell's -ArgumentList by any prefix it accepts, and its alias.
+const ARG_LIST = /^-(?:args|a(?:r(?:g(?:u(?:m(?:e(?:n(?:t(?:l(?:i(?:s(?:t)?)?)?)?)?)?)?)?)?)?)?)$/i;
+const ENCODED = /^-(?:ec|e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?)$/i;
+
+function checkSegment(segment, shell, cwd, depth, feed) {
+  const words = unwrapped(segment);
+  if (words.length === 0) return;
   const names = words.map(commandName);
   const headAt = names.findIndex((name, index) => !/^[A-Za-z_]\w*=/.test(words[index]) && !WRAPPERS.has(name));
   const head = names[headAt] ?? '';
   const text = words.join(' ');
   // The head keeps its spaces (a quoted path to the binary); so does PowerShell's -ArgumentList, the tool's own
-  // words. A shell body is judged below, as a command of its own.
-  const blank = (word, index) => /\s/.test(word) && (index !== headAt || /[\r\n]/.test(word)) && !/^-(?:ArgumentList|Args)$/i.test(words[index - 1] ?? '');
+  // words, whose comma list (`'apply','-auto-approve'`) is split into them. A shell body is judged below, as a command
+  // of its own.
+  // Behind Start-Process any prefix of -ArgumentList is it (`-A`); elsewhere `-a` is another tool's flag.
+  const argList = names.some((name) => /^(?:start-process|saps|start)$/.test(name)) ? ARG_LIST : /^-(?:ArgumentList|Args)$/i;
+  const blank = (word, index) => /\s/.test(word) && (index !== headAt || /[\r\n]/.test(word)) && !argList.test(words[index - 1] ?? '');
   const argument = (word, index) => !words.redirected?.has(index);
-  const bareWords = words.map((word, index) => (blank(word, index) ? '_' : word)).filter(argument);
+  const bareWords = words.flatMap((word, index) => {
+    if (!argument(word, index)) return [];
+    if (blank(word, index)) return ['_'];
+    return argList.test(words[index - 1] ?? '') && word.includes(',') ? word.split(',').filter(Boolean) : [word];
+  });
   const bare = bareWords.join(' ');
   const scopes = { bare, sql: text.replace(/'[^']*'/g, "''"), words: bareWords, raw: words.filter(argument) };
   // `sls` is Select-String in PowerShell and the serverless CLI everywhere else.
@@ -1203,19 +1551,25 @@ function checkSegment(words, shell, cwd, depth, feed) {
     });
   }
 
-  const reader = names.findIndex((name) => READERS.has(name));
+  const commandIndex = commandAt(words, names);
+  const reader = names.findIndex((name, index) => READERS.has(name) || readsByVerb(name, words, index));
   if (reader !== -1) {
     // What stands before the reader belongs to another program (`docker compose --env-file .env exec api cat x`);
     // `find` is the exception, it hands its own words to the reader it runs.
     const from = names.includes('find') ? 0 : reader;
     const plain = words.flatMap((word, index) => (index > reader && !word.startsWith('-') ? [index] : []));
-    const destination = COPIERS.has(names[reader]) && plain.length > 1 ? plain[plain.length - 1] : -1;
+    // A copy lands on its last plain word - unless an option names the target (`cp -t /tmp .env`,
+    // `Copy-Item -Destination x .env`), and then every plain word is a source.
+    const target = words.findIndex((word, index) => index > reader && /^(?:-t|--target-directory|-Destination|-Dest)$/i.test(word));
+    const destination = !COPIERS.has(names[reader]) ? -1 : target !== -1 ? target + 1 : plain.length > 1 ? plain[plain.length - 1] : -1;
+    // The wildcards the reader is handed as paths, listed on disk once the walks below have run.
+    const wild = [];
     let patternSeen = !SEARCHERS.has(names[reader]);
     words.forEach((word, index) => {
       const before = words[index - 1] ?? '';
       if (index === reader || index < from || index === destination) return;
-      // An exclusion is the opposite of a read - a git pathspec's `:!`, `:^` and `:(exclude)` included.
-      if (word.startsWith('!') || GIT_EXCLUDE.test(word) || EXCLUDE_WORD.test(word) || EXCLUDE_FLAG.test(before)) return;
+      // An exclusion is the opposite of a read - a git pathspec's `:!`, `:^` and `:(exclude)` included, and zip's `-x`.
+      if (word.startsWith('!') || GIT_EXCLUDE.test(word) || EXCLUDE_WORD.test(word) || EXCLUDE_FLAG.test(before) || (names[reader] === 'zip' && before === '-x')) return;
       const flag = word.startsWith('-');
       const values = flag ? word.split(/[=:]/).slice(1) : [word, ...word.split(/[=,]/)];
       if (!flag && index > reader && (EXPRESSION.test(before) || (!patternSeen && !PATH_PARAM.test(before)))) {
@@ -1223,9 +1577,28 @@ function checkSegment(words, shell, cwd, depth, feed) {
         patternSeen = true;
         return;
       }
-      for (const value of values) if (value && !value.startsWith('!') && reaches(value)) secretRefusal(value, 'print or copy');
+      for (const value of values) if (value && !value.startsWith('!') && reachesFrom(value, cwd)) secretRefusal(value, 'print or copy');
+      if (!flag && index > reader && reader === commandIndex && WILD.test(word) && !VALUE_OPTION.test(before)) wild.push(word);
     });
-    checkSearch(words, names, reader, cwd, feed);
+    checkSearch(words, names, reader, cwd, feed, shell);
+    for (const word of wild) {
+      const secret = globSecret(word, cwd, shell);
+      if (secret) secretRefusal(`${word} (${normalized(path.relative(cwd, secret))})`, 'print or copy');
+    }
+    if (reader === commandIndex) checkFolderCopy(words, names, reader, destination, cwd);
+  }
+
+  const uploader = names.findIndex((name) => UPLOADERS.has(name));
+  if (uploader !== -1) {
+    const form = words.findIndex((word) => /^-Form$/i.test(word));
+    words.forEach((word, index) => {
+      if (index <= uploader) return;
+      const pieces = [...word.matchAll(/[@<]([^;,{}\s]+)/g)].map((match) => match[1]);
+      const joined = /^--(?:upload-file|post-file|body-file)=(.+)$/i.exec(word);
+      if (joined) pieces.push(joined[1]);
+      if (UPLOAD_FILE.test(words[index - 1] ?? '') || (form !== -1 && index > form)) pieces.push(word.replace(/^@?\{?(?:[\w-]+=)?/, '').replace(/[})]+$/, ''));
+      for (const piece of pieces) if (piece && reachesFrom(piece, cwd)) secretRefusal(piece, 'upload');
+    });
   }
 
   // `git show HEAD:.env` and `git diff -- .env` print the file as surely as `cat` does; `git log` only with a patch.
@@ -1247,11 +1620,41 @@ function checkSegment(words, shell, cwd, depth, feed) {
     for (const word of removed(words, names)) {
       if (!word.startsWith('-') && (DATA_DIR.test(normalized(word)) || DATA_ROOT.test(normalized(word)))) ask('a database data folder', 'data');
     }
+    // A secret file deleted or moved away holds values only the owner has: by name or by a wildcard on disk, behind
+    // a deleting `find`, or handed over a pipe (`gi .env | Remove-Item`, `echo .env | xargs rm`).
+    for (const word of removedSources(words, names)) {
+      if (!word.startsWith('-') && (reachesFrom(word, cwd) || globSecret(word, cwd, shell))) secretDeleteRefusal(word);
+    }
+    const deletingFind = names[commandIndex] === 'find' && (words.includes('-delete') || words.some((word, index) => FIND_RUNS.test(word) && REMOVERS.has(names[index + 1])));
+    const walks = deletingFind ? findWalks(words, commandIndex) : fedWalks(words, names, commandIndex, feed, PS_FED_REMOVERS, REMOVERS, shell);
+    for (const { folder, filters } of walks) {
+      const secret = reaches(folder) ? folder : secretUnder(absolute(homeExpanded(folder), cwd), filters);
+      if (secret === TOO_LARGE) ask(normalized(folder), 'large');
+      else if (secret) secretDeleteRefusal(secret === folder ? folder : normalized(path.relative(cwd, secret)));
+    }
   }
 
   if (head === 'git') checkGitGrep(words, names, cwd);
 
-  if (depth < MAX_DEPTH && names.some((name) => LAUNCHERS.has(name))) {
+  if (CODEX && !words.piped && !words.stdin) {
+    const session = sessionClient(words);
+    if (session) {
+      deny(
+        `Blocked by .claude/hooks/backend-guard.mjs: this opens an interactive database session or console (${session}), and what is typed into a running command reaches no check. ${RULE}: pass the statement with the client's own flag or a file, or name the session and the developer opens it in their own terminal.`,
+      );
+    }
+  }
+
+  // `pwsh -EncodedCommand <base64>` runs the decoded text.
+  if (names.some((name) => name === 'pwsh' || name === 'powershell')) {
+    words.forEach((word, index) => {
+      if (!ENCODED.test(words[index - 1] ?? '') || !/^[A-Za-z0-9+/]{4,}={0,2}$/.test(word)) return;
+      if (depth < MAX_DEPTH) checkCommand(Buffer.from(word, 'base64').toString('utf16le'), 'PowerShell', cwd, depth + 1);
+      else tooDeep();
+    });
+  }
+
+  if (names.some((name) => LAUNCHERS.has(name))) {
     // cmd reads a backslash as a path separator, as PowerShell does; anything else keeps the caller's shell.
     const inner = names.some((name) => name === 'pwsh' || name === 'powershell' || name === 'cmd')
       ? 'PowerShell'
@@ -1261,9 +1664,162 @@ function checkSegment(words, shell, cwd, depth, feed) {
     // What follows a searcher or a printer is its pattern or its message, not a command to run.
     const quietAt = names.findIndex((name) => SEARCHERS.has(name) || name === 'echo' || name === 'printf');
     words.forEach((word, index) => {
-      if (/\s/.test(word) && (quietAt === -1 || index < quietAt)) checkCommand(word, inner, cwd, depth + 1);
+      if (!/\s/.test(word) || (quietAt !== -1 && index >= quietAt)) return;
+      if (depth < MAX_DEPTH) checkCommand(word, inner, cwd, depth + 1);
+      else tooDeep();
     });
   }
+}
+
+// ---- Under the Codex switch only: an interactive database session or console. What is typed into a running
+// command fires no hook there, so a client left open is a database shell nothing checks. ----
+const SESSION_CLIENTS = new Set([
+  'psql', 'pgcli', 'mysql', 'mariadb', 'mycli', 'sqlcmd', 'sqlite3', 'duckdb', 'usql', 'cockroach', 'clickhouse-client', 'clickhouse',
+  'mongosh', 'mongo', 'redis-cli', 'valkey-cli', 'sqlplus', 'cqlsh',
+]);
+const CONTAINER_SHELLS = new Set(['bash', 'sh', 'ash', 'zsh', 'dash', 'ksh', 'fish', 'pwsh', 'powershell']);
+// `django` is the module `python -m django` runs.
+const CONSOLES = new Set(['manage.py', 'django-admin', 'django', 'artisan', 'rails', 'flask']);
+// What may stand before a client in command position: a shell or a launcher with its switches, a package runner, an
+// interpreter that runs a console's script (`python manage.py shell`, `py -3 -m django shell`, `bundle exec rails c`).
+const LAUNCH_NAME = /^(?:cmd|pwsh|powershell|bash|sh|zsh|dash|ksh|wsl|winpty|start-process|saps|start|invoke-command|icm|python[\d.]*|py|php|ruby|uv|poetry|pipenv|pdm|hatch|rye|bundle|run|exec)$/;
+const LAUNCH_SWITCH = /^(?:\/[ck]|-[lc]+|-command|-noprofile|-nop|-nologo|-nol|-noninteractive|-noni|-nonewwindow|-wait|-passthru|-filepath|-scriptblock|-e|--exec|-m|-[\d.]+|-[uBEsSOIqX]|--)$/i;
+// A launcher's switch that takes the next word as its value: `wsl -d Ubuntu`, `pwsh -ExecutionPolicy Bypass`.
+const LAUNCH_VALUE = /^(?:-d|--distribution|--cd|-executionpolicy|-ep|-windowstyle|-workingdirectory)$/i;
+// `docker run` options that take the next word as their value: the first other plain word is the image.
+const RUN_VALUE = /^(?:-[evpwuhlm]|--(?:env|volume|publish|workdir|user|hostname|label|memory|name|network|net|entrypoint|env-file|mount|platform|add-host|cpus|restart|pull|cidfile|device|dns|expose|group-add|ipc|link|log-driver|pid|runtime|security-opt|shm-size|stop-signal|tmpfs|ulimit|uts))$/;
+
+// The client, console or shell a segment leaves open, or ''.
+function sessionClient(words) {
+  const names = words.map(commandName);
+  let at = 0;
+  for (;;) {
+    const before = at;
+    at += commandAt(words.slice(at), names.slice(at));
+    for (;;) {
+      // `-u` is wsl's user and python's unbuffered switch.
+      if (at < words.length && (LAUNCH_VALUE.test(words[at]) || (/^(?:-u|--user)$/.test(words[at]) && names.slice(0, at).includes('wsl')))) at += 2;
+      else if (at < words.length && (LAUNCH_NAME.test(names[at]) || LAUNCH_SWITCH.test(words[at]))) at += 1;
+      else break;
+    }
+    if (at === before) break;
+  }
+  const name = names[at] ?? '';
+  // A word with blanks after the client (a Start-Process argument list) is read word by word.
+  const rest = words.slice(at + 1).flatMap((word) => (/\s/.test(word) ? word.trim().split(/\s+/) : [word]));
+  if (SESSION_CLIENTS.has(name)) return clientStaysOpen(name, rest) ? name : '';
+  if (CONSOLES.has(name)) return consoleOpen(name, rest);
+  if (!CONTAINER_RUNNERS.has(name)) return '';
+  // In a container: the first client, console or shell after `exec` / `run` that is no option's value. docker,
+  // podman and kubectl attach stdin only with -i; compose exec and run always do.
+  const verb = names.findIndex((word, index) => index > at && (word === 'exec' || word === 'run'));
+  if (verb === -1) return '';
+  const compose = /compose$/.test(name) || names.slice(at, verb).includes('compose');
+  const interactive = compose || words.slice(verb + 1).some((word) => /^-[A-Za-z]*i[A-Za-z]*$/.test(word) || /^--(?:interactive|stdin)(?:=true)?$/.test(word));
+  if (!interactive) return '';
+  const inside = names.findIndex(
+    (word, index) => index > verb && (SESSION_CLIENTS.has(word) || CONTAINER_SHELLS.has(word) || CONSOLES.has(word)) && !/^-(?!-$)/.test(words[index - 1]),
+  );
+  if (inside === -1) {
+    // `docker run -it alpine` runs the image's own command, often a shell: one with nothing after the image.
+    if (compose || names[verb] !== 'run' || !/^(?:docker|podman|nerdctl)$/.test(name)) return '';
+    const plain = [];
+    for (let index = verb + 1; index < words.length; index += 1) {
+      if (RUN_VALUE.test(words[index])) index += 1;
+      else if (!words[index].startsWith('-')) plain.push(words[index]);
+    }
+    return plain.length === 1 ? `${name} run ${plain[0]}` : '';
+  }
+  const after = words.slice(inside + 1);
+  if (CONSOLES.has(names[inside])) return consoleOpen(names[inside], after);
+  if (CONTAINER_SHELLS.has(names[inside])) {
+    // `sh -c psql` runs the one word it is given: that word is judged as typed alone.
+    const code = after.findIndex((word) => /^-(?:[A-Za-z]*c|command)$/i.test(word));
+    if (code !== -1 && after[code + 1] && !/\s/.test(after[code + 1])) return sessionClient([after[code + 1]]);
+    return after.some((word) => !word.startsWith('-') || /^-(?:[A-Za-z]*c|command|file|f|ec|encodedcommand)$/i.test(word)) ? '' : names[inside];
+  }
+  return clientStaysOpen(names[inside], after) ? names[inside] : '';
+}
+
+// A console's subcommand is its first plain word that is no option's value (`flask --app app shell`).
+function consoleOpen(name, rest) {
+  const sub = rest.find((word, index) => !word.startsWith('-') && !/^(?:--app|-A|--env-file|-e|--settings|--pythonpath)$/.test(rest[index - 1] ?? '')) ?? '';
+  return consoleStaysOpen(name, sub, rest) ? `${name} ${sub}` : '';
+}
+
+// Whether a short option cluster hands the client work: its letters are read left to right, and one that takes a
+// value ends the cluster - `-qAtc` carries -c, `-Ualice` is a user name, `-psecret` a password.
+function clusterHas(word, closers, valued) {
+  if (!/^-[A-Za-z]/.test(word) || word.startsWith('--')) return false;
+  for (const letter of word.slice(1)) {
+    if (closers.includes(letter)) return true;
+    if (valued.includes(letter)) return false;
+  }
+  return false;
+}
+
+// Whether a database client started with these words waits for typed input: nothing hands it a statement, a file or
+// a mode of its own.
+function clientStaysOpen(name, words) {
+  const has = (pattern) => words.some((word) => pattern.test(word));
+  if (has(/^(?:--version|--help|-\?)$/)) return false;
+  const plain = (valued) => {
+    const found = [];
+    for (let index = 0; index < words.length; index += 1) {
+      if (valued.test(words[index])) index += 1;
+      else if (!words[index].startsWith('-')) found.push(words[index]);
+    }
+    return found;
+  };
+  switch (name) {
+    case 'psql':
+    case 'pgcli':
+      return !(words.some((word) => clusterHas(word, 'cfl', 'dhLopPTUvFR')) || has(/^--(?:command|file|list)(?:=|$)|^-V$/));
+    case 'mysql':
+    case 'mariadb':
+    case 'mycli':
+      return !(words.some((word) => clusterHas(word, 'e', 'uphPDSOTW')) || has(/^--execute(?:=|$)|^-V$/));
+    case 'sqlcmd':
+      // `-q` runs its query and stays open; `-Q` and `-i` exit.
+      return !has(/^-[Qi]$|^--query(?:=|$)/);
+    case 'usql':
+      return !has(/^-[cf]$|^--(?:command|file)(?:=|$)/);
+    case 'cockroach':
+      return /^(?:sql|demo)$/.test(plain(/^$/)[0] ?? '') && !has(/^-[ef]$|^--(?:execute|file)(?:=|$)/);
+    case 'clickhouse':
+      if (!/^(?:client|local)$/.test(plain(/^$/)[0] ?? '')) return false;
+    // falls through
+    case 'clickhouse-client':
+      return !has(/^-q$|^--query(?:=|$)|^--queries-file(?:=|$)/);
+    case 'mongosh':
+    case 'mongo':
+      return has(/^--shell$/) || !(has(/^(?:--eval|-f|--file)(?:=|$)/) || plain(/^$/).some((word) => /\.js$/i.test(word)));
+    case 'redis-cli':
+    case 'valkey-cli':
+      if (has(/^--(?:scan|bigkeys|memkeys|hotkeys|latency|latency-history|latency-dist|stat|pipe|rdb|functions-rdb|eval|lru-test|intrinsic-latency)(?:=|$)/)) return false;
+      return plain(/^(?:-[hpsaunridDt]|--(?:user|pass|cacert|cacertdir|cert|key|sni|tls-ciphers|tls-ciphersuites|pattern|count))$/).length === 0;
+    case 'sqlite3':
+    case 'duckdb':
+      return !has(/^-c$|^-(?:version|help)$/) && plain(/^-(?:cmd|init|separator|newline|nullvalue|vfs|maxsize|mmap)$/).length < 2;
+    case 'sqlplus':
+      return !has(/^@|^-[VH]$/i);
+    case 'cqlsh':
+      return !has(/^(?:-e|--execute|-f|--file)(?:=|$)/);
+    default:
+      return false;
+  }
+}
+
+// A framework's console: `rails console` always waits for input; Django's `shell` unless given `-c`, its `dbshell`
+// unless handed the client's own arguments after `--`; `artisan tinker` unless `--execute`; `flask shell` always.
+function consoleStaysOpen(name, sub, words) {
+  if (name === 'rails') return /^(?:console|c|dbconsole|db)$/.test(sub);
+  if (name === 'flask') return sub === 'shell';
+  if (name === 'django' && sub === 'dbshell') return !(words.includes('--') && words.indexOf('--') < words.length - 1);
+  if (name === 'artisan') return sub === 'tinker' && !words.some((word) => /^--execute(?:=|$)/.test(word));
+  if (/^(?:shell|shell_plus)$/.test(sub)) return !words.some((word) => /^(?:-c|--command)(?:=|$)/.test(word));
+  if (sub === 'dbshell') return !(words.includes('--') && words.indexOf('--') < words.length - 1);
+  return false;
 }
 
 // The string literals of a piece of code: one that names a secret file is a read of it.
@@ -1273,9 +1829,21 @@ function checkCodeLiterals(code) {
   }
 }
 
+// A shell a quoted string is piped into runs it: PowerShell's `iex`, `Invoke-Expression`, `pwsh`, `powershell`, `cmd`.
+const PS_SHELL_READER = /(?:^|[\s;&|(\/])(?:iex|invoke-expression|pwsh|powershell|cmd)(?=[\s;&|)]|$)/i;
+
 function checkCommand(command, shell, cwd, depth) {
-  const { outer, bodies } = withoutSubstitutions(depth === 0 ? withoutHeredocs(command) : command, shell);
-  if (depth < MAX_DEPTH) for (const body of bodies) checkCommand(body, shell, cwd, depth + 1);
+  let text = command;
+  if (shell === 'PowerShell') {
+    text = hereStringsQuoted(text, cwd, depth);
+    // `-ArgumentList @('apply','-auto-approve')` is the list `'apply','-auto-approve'`.
+    text = text.replace(/(\s)(-\w+)(\s+)@\(([^()]*)\)/g, (whole, space, flag, gap, list) => (ARG_LIST.test(flag) ? `${space}${flag}${gap}${list}` : whole));
+  } else if (depth === 0) text = withoutHeredocs(text);
+  const { outer, bodies } = withoutSubstitutions(text, shell);
+  for (const body of bodies) {
+    if (depth < MAX_DEPTH) checkCommand(body, shell, cwd, depth + 1);
+    else tooDeep();
+  }
   noteDockerAssignments(outer);
   noteDatabaseAssignments(outer);
   // A .NET file call reads or writes the path it names: `[IO.File]::ReadAllText('.env')`.
@@ -1287,32 +1855,123 @@ function checkCommand(command, shell, cwd, depth) {
     if (isSecret(target)) secretRefusal(target, 'read');
   }
   // What echo or printf pipes into a database client is its statement; into a shell, a command. PowerShell pipes
-  // a bare quoted string the same way.
-  for (const [, echoed, quoted, reader] of outer.matchAll(/(?:^|[\n;&|(])\s*(?:(?:echo|printf)\s([^|\n]*)|("[^"\n]*"|'[^'\n]*')\s*)\|([^|;&\n]*)/g)) {
-    const body = echoed ?? quoted;
+  // a bare quoted string the same way - one written as PowerShell writes it (`''` an apostrophe, a backtick an
+  // escape, over several lines: a here-string is one by now).
+  const quotedForm = shell === 'PowerShell' ? String.raw`'(?:[^']|'')*'|"(?:[^"\x60]|\x60[\s\S])*"` : String.raw`"[^"\n]*"|'[^'\n]*'`;
+  const pipedText = new RegExp(String.raw`(?:^|[\n;&|(])\s*(?:(?:echo|printf)\s([^|\n]*)|(${quotedForm})\s*)\|([^|;&\n]*)`, 'g');
+  for (const [, echoed, quoted, reader] of outer.matchAll(pipedText)) {
+    const body =
+      echoed ??
+      (shell !== 'PowerShell' ? quoted : quoted.startsWith("'") ? quoted.slice(1, -1).replace(/''/g, "'") : quoted.slice(1, -1).replace(/\x60([\s\S])/g, '$1'));
     checkStdinSql(reader, body);
-    if (depth < MAX_DEPTH && SHELL_HEREDOC.test(reader)) checkCommand(body.trim().replace(/^(["'])(.*)\1$/s, '$2'), 'Bash', cwd, depth + 1);
+    const runner = SHELL_HEREDOC.test(reader) ? 'Bash' : shell === 'PowerShell' && PS_SHELL_READER.test(reader) ? 'PowerShell' : '';
+    if (!runner) continue;
+    if (depth < MAX_DEPTH) checkCommand(body.trim().replace(/^(["'])(.*)\1$/s, '$2'), runner, cwd, depth + 1);
+    else tooDeep();
   }
   const segments = segmentsOf(outer, shell);
   segments.forEach((words, index) => checkSegment(words, shell, cwd, depth, words.piped ? segments[index - 1] : undefined));
 }
 
+// ---- OpenAI Codex: the input form below runs only under the switch. ----
+
+// The grammar a Codex `Bash` call is judged by: the shell the call names when it names one, otherwise the platform's.
+// cmd reads a backslash as a path separator, as PowerShell does.
+function codexShell(tool, named) {
+  const name = commandName(Array.isArray(named) ? (named[0] ?? '') : typeof named === 'string' ? named : '');
+  if (/^(?:bash|sh|zsh|dash|ksh)$/.test(name)) return 'Bash';
+  if (/^(?:pwsh|powershell|cmd)$/.test(name)) return 'PowerShell';
+  return tool === 'PowerShell' || process.platform === 'win32' ? 'PowerShell' : 'Bash';
+}
+
+// A command handed over as an argument list, written back as the one line a shell would get: every word that is not
+// plain goes into double quotes, so `pwsh -Command <code>` and `bash -lc <script>` are read as they run.
+function commandLine(parts, shell) {
+  const escape = shell === 'PowerShell' ? '`' : '\\';
+  const special = shell === 'PowerShell' ? /[`"$]/g : /[\\"$`]/g;
+  return parts
+    .filter((part) => typeof part === 'string')
+    .map((part) => (/^[\w@%+=:,./\\-]+$/.test(part) ? part : `"${part.replace(special, (ch) => escape + ch)}"`))
+    .join(' ');
+}
+
+// Every file a patch names. Headers are read with padding and in any case, wider than the grammar, so a path the
+// engine would accept is never missed; a `Move to` belongs to the `Update File` above it.
+function patchOps(text) {
+  const ops = [];
+  let current;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const head = /^\s*\*\*\* (Add File|Update File|Delete File|Move to):\s*(.+?)\s*$/i.exec(line);
+    if (head && /^move to$/i.test(head[1])) {
+      if (current?.kind === 'update' && current.moveTo === undefined) current.moveTo = head[2];
+      else ops.push((current = { kind: 'add', path: head[2] }));
+    } else if (head) {
+      ops.push((current = { kind: head[1].split(' ')[0].toLowerCase(), path: head[2] }));
+    }
+  }
+  return ops;
+}
+
+// A patch, file by file: a written path (an `Add File`, an `Update File`, a `Move to`'s destination) as Edit / Write
+// are judged; a removed one (a `Delete File`, a `Move to`'s source) as a shell delete is.
+function checkPatch(text, cwd) {
+  for (const op of patchOps(text)) {
+    if (op.kind === 'delete' || op.moveTo !== undefined) {
+      if (isSecret(op.path) || isSecret(absolute(op.path, cwd))) secretDeleteRefusal(op.path);
+      if (isFrozenPath(absolute(op.path, cwd)) && frozenAt(op.path, cwd)) frozenRefusal(op.path, 'delete or move');
+    }
+    if (op.kind !== 'delete') checkWrite(op.moveTo ?? op.path, cwd);
+  }
+}
+
+function codexCall(payload) {
+  if (payload.hook_event_name !== undefined && payload.hook_event_name !== 'PreToolUse') return;
+  if (listErrors.length) {
+    deny(`Blocked by .claude/hooks/backend-guard.mjs: ${listErrors[0]} in .claude/hooks/backend-guard.mjs. Until the developer fixes that list this guard refuses every call - tell them, and do not work around it.`);
+  }
+  const tool = payload.tool_name;
+  const input = payload.tool_input ?? {};
+  const base = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
+  const workdir = [input.workdir, input.cwd].find((value) => typeof value === 'string' && value);
+  const cwd = workdir ? absolute(workdir, base) : base;
+  if (tool === 'apply_patch' || tool === 'Edit' || tool === 'Write') {
+    const patch = [input.command, input.patch, input.input].find((value) => typeof value === 'string');
+    if (patch !== undefined) checkPatch(patch, cwd);
+  } else if (tool === 'Bash' || tool === 'PowerShell') {
+    const shell = codexShell(tool, input.shell);
+    const typed = typeof input.command === 'string' ? input.command : Array.isArray(input.command) ? commandLine(input.command, shell) : undefined;
+    if (typed !== undefined) checkCommand(typed, shell, cwd, 0);
+  }
+}
+
+let parsed = false;
 try {
   const payload = JSON.parse(await readStdin());
-  const name = payload.tool_name;
-  const input = payload.tool_input ?? {};
-  const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
-  if (name === 'Read') checkRead(input.file_path);
-  else if (name === 'Grep') {
-    checkRead(input.path);
-    // A glob that leaves a file out (`!.env`) is the opposite of a read.
-    for (const glob of typeof input.glob === 'string' ? grepGlobs(input.glob) : []) if (!glob.startsWith('!') && reaches(glob)) secretRefusal(glob, 'read');
-    checkGrepTool(input, cwd);
-  } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') checkWrite(input.file_path, cwd);
-  else if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') checkCommand(input.command, name, cwd, 0);
+  parsed = true;
+  if (CODEX) codexCall(payload);
+  else {
+    const name = payload.tool_name;
+    const input = payload.tool_input ?? {};
+    const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
+    if (name === 'Read') checkRead(input.file_path);
+    else if (name === 'Grep') {
+      checkRead(input.path);
+      // A glob that leaves a file out (`!.env`) is the opposite of a read.
+      for (const glob of typeof input.glob === 'string' ? grepGlobs(input.glob) : []) if (!glob.startsWith('!') && reaches(glob)) secretRefusal(glob, 'read');
+      checkGrepTool(input, cwd);
+    } else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') checkWrite(input.file_path, cwd);
+    else if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string') checkCommand(input.command, name, cwd, 0);
+  }
 } catch {
-  // Unparseable input: allow. guard.mjs, the deny list in settings.json and the rules still apply.
+  // Unparseable input: allow. guard.mjs, the deny list in settings.json and the rules still apply. Under Codex a call
+  // that parsed and then stopped the guard is refused: it was not judged.
+  if (CODEX && parsed) deny('Blocked by .claude/hooks/backend-guard.mjs: this call could not be judged - the guard stopped on it. Split the command into simpler calls.');
   question = '';
+}
+if (CODEX) {
+  if (question) deny(question);
+  process.exit(0);
 }
 if (question || listErrors.length) {
   const output = listErrors.length ? { systemMessage: listErrors.join(' ') } : {};

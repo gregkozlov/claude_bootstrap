@@ -555,6 +555,79 @@ const builtIn = [
   ['a heredoc a shell by full path runs (deny)', 2, bash(['/bin/bash <<EOF', 'terraform apply -auto-approve', 'EOF'].join(NL))],
   ['a command echoed into a shell (deny)', 2, bash('echo "terraform apply -auto-approve" | bash')],
   ['the project check command (allow)', 0, bash('make check')],
+  // A PowerShell here-string is one quoted word: an apostrophe in it hides nothing after it, and what it is piped
+  // into reads it. PowerShell has no heredoc, and a `<<` inside quotes opens none in Bash.
+  ['a here-string with an apostrophe, then a deploy (deny)', 2, pwsh(["$x = @'", "it's", "'@", 'terraform apply'].join(NL))],
+  ['a here-string with an apostrophe written to the temp folder (allow)', 0, pwsh(["Set-Content $env:TEMP/notes.md -Value @'", "it's terraform apply time", "'@"].join(NL))],
+  ['a here-string piped into iex (deny)', 2, pwsh(["@'", 'terraform apply', "'@ | iex"].join(NL))],
+  ['a double-quoted here-string piped into Invoke-Expression (deny)', 2, pwsh(['@"', 'terraform apply', '"@ | Invoke-Expression'].join(NL))],
+  ['a here-string piped into psql (ask)', 'ask', pwsh(["@'", 'DROP TABLE users;', "'@ | psql -d app"].join(NL))],
+  ['a subexpression inside a double-quoted here-string (deny)', 2, pwsh(['@"', '$(terraform apply)', '"@ | Out-Null'].join(NL))],
+  ['a quoted at-sign is no here-string (deny)', 2, pwsh(["Write-Output 'mail@'", 'terraform apply', "'@'"].join(NL))],
+  ['an at-sign in a comment is no here-string (deny)', 2, pwsh(["# note @'", 'terraform apply', "'@"].join(NL))],
+  ['a quoted << in PowerShell opens no heredoc (deny)', 2, pwsh(["Write-Output 'a <<END'", 'terraform apply', 'END'].join(NL))],
+  ['a quoted << in Bash opens no heredoc (deny)', 2, bash(["echo '<<END'", 'terraform apply', 'END'].join(NL))],
+  ['a PowerShell string with a doubled apostrophe piped into iex (deny)', 2, pwsh("'terraform apply; Write-Host ''x''' | iex")],
+  ['pwsh -EncodedCommand (deny)', 2, pwsh('pwsh -EncodedCommand dABlAHIAcgBhAGYAbwByAG0AIABhAHAAcABsAHkA')],
+  // A glob that would throw or backtrack once let the whole call through.
+  ['an unbalanced bracket in a grep include, then a deploy (deny)', 2, bash('grep -r --include=[ KEY app ; terraform apply')],
+  ['an unbalanced bracket, then a wipe (ask)', 'ask', bash("psql -d app -c 'DROP TABLE users'; grep -r --include=[ KEY app")],
+  // Start-Process takes its arguments by any prefix of -ArgumentList, as a comma list or an array.
+  ['Start-Process with a comma list (deny)', 2, pwsh("Start-Process terraform -ArgumentList 'apply','-auto-approve'")],
+  ['Start-Process with a prefix of -ArgumentList (deny)', 2, pwsh("Start-Process terraform -A 'apply','-auto-approve'")],
+  ['Start-Process with an array (deny)', 2, pwsh("Start-Process terraform -ArgumentList @('apply','-auto-approve')")],
+  // An archive, a recoding or an upload copies a secret; a hash or a key generation does not read one out.
+  ['Compress-Archive of the env file (deny)', 2, pwsh('Compress-Archive .env $env:TEMP/x.zip')],
+  ['zip of the env file (deny)', 2, bash('zip /tmp/x.zip .env')],
+  ['zip that leaves the env file out (allow)', 0, bash('zip -r /tmp/app.zip . -x .env')],
+  ['certutil -encode of the env file (deny)', 2, pwsh('certutil -encode .env out.txt')],
+  ['certutil -hashfile of the env file (allow)', 0, pwsh('certutil -hashfile .env SHA256')],
+  ['openssl base64 of the env file (deny)', 2, bash('openssl base64 -in .env')],
+  ['openssl genrsa writing a key (allow)', 0, bash('openssl genrsa -out /tmp/server.key 2048')],
+  ['curl uploading the env file as a form field (deny)', 2, bash('curl -F f=@.env http://localhost:8080/u')],
+  ['curl uploading the env file as a body (deny)', 2, bash('curl --data-binary @.env http://localhost:8080/u')],
+  ['Invoke-WebRequest uploading the env file (deny)', 2, pwsh('Invoke-WebRequest -Method Post -InFile .env -Uri http://localhost:8080/u')],
+  ['perl printing the env file (deny)', 2, bash('perl -pe 1 .env')],
+  ['a local curl (allow)', 0, bash('curl -s http://localhost:8080/health')],
+  // A secret file deleted or moved away holds values only the owner has.
+  ['rm of the env file (deny)', 2, bash('rm .env')],
+  ['Remove-Item of the env file (deny)', 2, pwsh('Remove-Item .env')],
+  ['del of a private key (deny)', 2, pwsh(`del certs${BS}server.key`)],
+  ['rm of the env file inside a block (deny)', 2, bash('{ rm .env; }')],
+  ['Remove-Item of the env file inside a script block (deny)', 2, pwsh('& { Remove-Item .env }')],
+  ['Remove-Item of the env file in a ForEach-Object block (deny)', 2, pwsh('1 | % { Remove-Item .env }')],
+  ['echo of the env file name into xargs rm (deny)', 2, bash('echo .env | xargs rm')],
+  ['Get-Item of the env file piped into Remove-Item (deny)', 2, pwsh('Get-Item .env | Remove-Item')],
+  ['a move onto the env file name (allow)', 0, bash('mv .env.example .env')],
+  ['a rename onto the env file name (allow)', 0, pwsh('Rename-Item .env.sample .env')],
+  ['git rm --cached of the env file, which keeps it (allow)', 0, bash('git rm --cached .env')],
+  ['rm of a plain file (allow)', 0, bash('rm notes.txt')],
+  ['a data folder deleted inside a block (ask)', 'ask', bash('{ rm -rf /var/lib/postgresql/16/main; }')],
+  // Windows opens these spellings as the file itself.
+  ['Get-Content of the env file with a stream suffix (deny)', 2, pwsh(`Get-Content '.${BS}.env::$DATA'`)],
+  ['Get-Content of the env file with a trailing blank (deny)', 2, pwsh(`Get-Content '.${BS}.env '`)],
+  ['Write of the env file with a trailing dot (deny)', 2, write(inRoot('.env.'))],
+  // Nested past the depth this hook reads: passed unread here, refused under the Codex switch (part 4).
+  // A copy names its target with an option, a Windows copier, a block brace glued to the last word, an upload field
+  // with a modifier: the secret is still read. A client certificate and a URL path are not files sent.
+  ['Copy-Item with the destination first (deny)', 2, pwsh('Copy-Item -Destination $env:TEMP/e.txt -Path .env')],
+  ['cp with a target directory option (deny)', 2, bash('cp -t /tmp .env')],
+  ['robocopy of the env file (deny)', 2, pwsh('robocopy . $env:TEMP .env')],
+  ['xcopy of the env file (deny)', 2, pwsh('xcopy .env $env:TEMP')],
+  ['a brace glued to the env file in a ForEach-Object block (deny)', 2, pwsh('1 | % { gc .env}')],
+  ['Invoke-Command with a script block (deny)', 2, pwsh('Invoke-Command { Get-Content .env}')],
+  ['a delete in an if block, brace glued (deny)', 2, pwsh('if (Test-Path .env) { Remove-Item .env}')],
+  ['a curl form field with a type modifier (deny)', 2, bash('curl -F "file=@.env;type=text/plain" http://localhost:8080/u')],
+  ['an Invoke-RestMethod form with the env file (deny)', 2, pwsh('Invoke-RestMethod -Uri http://localhost:8080/u -Method Post -Form @{file=Get-Item .env}')],
+  ['curl with a client certificate and key (allow)', 0, bash('curl --cert certs/client.pem --key certs/client.key https://localhost:8443/health')],
+  ['curl of a URL path that names an env file (allow)', 0, bash('curl -s http://localhost:3000/.env')],
+  ['a one-line here-string written to a doc (allow)', 0, pwsh(["@'", 'Run terraform apply after review.', "'@ | Set-Content docs/deploy.md"].join(NL))],
+  ['Remove-Item of a folder that excludes the env file (allow)', 0, pwsh('Remove-Item app/* -Exclude .env')],
+  ['dotnet user-secrets list (ask)', 'ask', bash('dotnet user-secrets list')],
+  ['sops decrypting a file (ask)', 'ask', bash('sops -d secrets.enc.yaml')],
+  ['rails credentials:show (ask)', 'ask', bash('bin/rails credentials:show')],
+  ['a vault read (ask)', 'ask', bash('vault kv get secret/app')],
+  ['four nested shells (allow, read three deep)', 0, bash(`bash -c 'bash -c "bash -c \\"bash -c terraform\\\\ apply\\""'`)],
   // The project's own lists - one case per entry of FROZEN_PATHS, SECRET_PATHS and FORBIDDEN_COMMANDS, e.g.:
   // ['Read the local settings file (deny)', 2, read(inRoot('config', 'local.settings.json'))],
   // ['the deploy target (deny)', 2, bash('make deploy')],
@@ -599,6 +672,32 @@ function run(part, hook, cases, cwd) {
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${part} ${name.padEnd(58)} ${String(got).padEnd(4)} ${(r.stderr ?? '').trim().slice(0, 50)}`);
   }
 }
+// Part 4, the Codex form: the same hook started with `--harness codex`, fed payloads in the shape OpenAI Codex sends - a
+// shell call is `Bash` whatever the shell, a file edit `apply_patch` with the patch text. A refusal is JSON on stdout
+// with exit 0, a pass prints nothing, and every question of the other form is a refusal; no reason may name the
+// other tool's mechanisms. [name, 'deny' | 'allow', payload, pattern the reason must match]
+const CLAUDE_WORDS = /CLAUDE|\.claude[\\/]|Grep tool|approve|scratchpad|permission prompt/;
+function runCodex(hook, cases, cwd) {
+  for (const [name, want, payload, says] of cases) {
+    const input = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'suite', cwd, ...payload });
+    const answer = spawnSync(process.execPath, [hook, '--harness', 'codex'], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd } });
+    let said = {};
+    try {
+      said = (answer.stdout ?? '').trim() ? (JSON.parse(answer.stdout).hookSpecificOutput ?? { permissionDecision: 'other' }) : {};
+    } catch {
+      said = { permissionDecision: 'unreadable' };
+    }
+    const got = said.permissionDecision ?? 'allow';
+    const reason = said.permissionDecisionReason ?? '';
+    // The wording check reads the sentence, not the paths in it: a folder on the way may itself be named so.
+    const sentence = [cwd, root].reduce((rest, folder) => rest.split(folder).join(''), reason);
+    const ok = answer.status === 0 && got === want && (!says || says.test(reason)) && !CLAUDE_WORDS.test(sentence);
+    if (ok) passed += 1;
+    else failed += 1;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} 4 ${name.padEnd(58)} ${got.padEnd(5)} ${reason.slice(0, 50)}`);
+  }
+}
+
 function setupFailed(what) {
   failed += 1;
   console.log(`FAIL setup: ${what}`);
@@ -725,6 +824,59 @@ try {
     ], project);
   }
 
+  // A wildcard the shell expands, a listing piped into a reader or a remover, and a deleting find are judged by the
+  // files they reach on disk: here `.env` sits at the top.
+  if (sample) {
+    run('2', sample, [
+      ['cat of a wildcard that takes the env file (deny)', 2, bash('cat .e*')],
+      ['cat of a bracket glob that takes it (deny)', 2, bash('cat .[e]nv')],
+      ['cat of a negated bracket glob that takes it (deny)', 2, bash('cat .[!x]nv')],
+      ['Get-Content of a wildcard that takes it (deny)', 2, pwsh('gc .en*')],
+      ['Get-Content of every file of the folder (deny)', 2, pwsh('Get-Content *')],
+      ['cat of every file, where Bash skips dot files (allow)', 0, bash('cat *')],
+      ['cat of a wildcard in the source folder (allow)', 0, bash('cat app/*')],
+      ['rg with a glob value, never expanded (allow)', 0, bash("rg KEY -g '.e*' app")],
+      ['rm of a wildcard that takes the env file (deny)', 2, bash('rm .e*')],
+      ['Get-Item of the env file piped into Get-Content (deny)', 2, pwsh('Get-Item .env | Get-Content')],
+      ['a filtered listing piped into Get-Content (deny)', 2, pwsh('gci -Force -Filter .env* | gc')],
+      ['a listing of the folder piped into Get-Content (deny)', 2, pwsh('gci | gc')],
+      ['Get-Item piped into a ForEach-Object reader (deny)', 2, pwsh('gi .env | % { gc $_ }')],
+      ['echo of the env file name into xargs cat (deny)', 2, bash('echo .env | xargs cat')],
+      ['ls -a into xargs cat (deny)', 2, bash('ls -a | xargs cat')],
+      ['ls without -a into xargs cat, no dot file (allow)', 0, bash('ls | xargs cat')],
+      ['ls piped into cat, which prints the names (allow)', 0, bash('ls | cat')],
+      ['a listing piped into Sort-Object (allow)', 0, pwsh('gci | Sort-Object Name')],
+      ['a listing of the source folder piped into Get-Content (allow)', 0, pwsh('gci app | gc')],
+      ['a find that deletes the env file (deny)', 2, bash('find . -name .env -delete')],
+      ['a listing piped into Remove-Item (deny)', 2, pwsh('gci -Force -Filter .env | Remove-Item')],
+      // A copy or an archive of a whole folder takes the secret files in it, unless its own exclusions leave them out.
+      ['tar of the folder that holds the env file (deny)', 2, bash('tar -czf /tmp/b.tgz .')],
+      ['tar that excludes every env file (allow)', 0, bash('tar -czf /tmp/b.tgz --exclude=.env .')],
+      ['zip -r of the folder (deny)', 2, bash('zip -r /tmp/b.zip .')],
+      ['zip -r of the source folder (allow)', 0, bash('zip -r /tmp/app.zip app')],
+      ['Copy-Item -Recurse of a folder with an env file deeper down (deny)', 2, pwsh('Copy-Item -Recurse apps $env:TEMP/x')],
+      ['Compress-Archive of a folder with an env file (deny)', 2, pwsh('Compress-Archive -Path apps -DestinationPath $env:TEMP/c.zip')],
+      ['robocopy of the folder (deny)', 2, pwsh('robocopy . $env:TEMP/bk /E')],
+      ['cp -r of the source folder (allow)', 0, bash('cp -r app /tmp/app-copy')],
+    ], project);
+    // A long name with many stars in the glob: a regex-built matcher backtracked past the hook's timeout here, which
+    // let the call through. Timed, not only judged.
+    mkdirSync(join(project, 'long'), { recursive: true });
+    writeFileSync(join(project, 'long', `${'a'.repeat(40)}.env`), 'KEY=placeholder\n');
+    for (const [name, command] of [
+      ['a grep include of many stars over a long secret name, in time', `grep -r --include='${'*'.repeat(25)}q' KEY long`],
+      ['an rg glob of many stars over a long secret name, in time', `rg -uu -g '${'*'.repeat(25)}q' KEY long`],
+    ]) {
+      const started = Date.now();
+      const r = spawnSync(process.execPath, [sample], { input: JSON.stringify({ cwd: project, ...bash(command) }), encoding: 'utf8', timeout: 5000 });
+      const ok = r.status === 0 && Date.now() - started < 5000;
+      if (ok) passed += 1;
+      else failed += 1;
+      console.log(`${ok ? 'ok  ' : 'FAIL'} 2 ${name.padEnd(58)} ${String(r.status).padEnd(4)} ${Date.now() - started} ms`);
+    }
+    rmSync(join(project, 'long'), { recursive: true, force: true });
+  }
+
   // The Grep tool and git grep skip what git ignores, not what it tracks: a secret file in the index is read.
   writeFileSync(join(project, '.gitignore'), '.env\n');
   mkdirSync(join(project, 'config'), { recursive: true });
@@ -842,6 +994,107 @@ try {
       ['git grep in a worktree in an ignored folder (allow)', 0, bash('git grep -n KEY')],
     ], tree);
   } else if (committed) setupFailed('could not add a worktree in the throwaway repo');
+
+  // Part 4: the Codex form, on the copy with the sample lists, in the throwaway repo as it now stands - origin/HEAD
+  // holds both committed migrations, `.env` sits at the top, `config/local.settings.json` is tracked.
+  const sh = (command, shell) => ({ tool_name: 'Bash', tool_input: { command, ...(shell ? { shell } : {}) } });
+  const ap = (...lines) => ({ tool_name: 'apply_patch', tool_input: { command: ['*** Begin Patch', ...lines, '*** End Patch'].join(NL) } });
+  const OWN = /in their own terminal/;
+  if (sample && committed) {
+    runCodex(sample, [
+      ['a session start is left alone (allow)', 'allow', { hook_event_name: 'SessionStart', source: 'startup' }],
+      ['a Read payload has no caller here (allow)', 'allow', read(join(project, '.env'))],
+      ['a deploy (deny)', 'deny', sh('terraform apply'), /deploys or changes infrastructure.*AGENTS\.md, Data, secrets and the outside world/],
+      // Every question of the other form is a refusal, each with what the user can do instead.
+      ['a destructive statement (deny)', 'deny', sh('psql -d app -c "DROP TABLE users"'), /destroys data.*in their own terminal/],
+      ['a cluster secret printed (deny)', 'deny', sh('kubectl --context kind-dev get secret db -o yaml'), /prints secret values.*in their own terminal/],
+      ['another host (deny)', 'deny', sh('ssh deploy@prod.example.com'), /reaches another machine.*in their own terminal/],
+      ['a migration stamp (deny)', 'deny', sh('alembic stamp head'), /record of which migrations ran.*in their own terminal/],
+      ['a data folder deleted (deny)', 'deny', sh('rm -rf /var/lib/postgresql/16/main'), OWN],
+      // Reads are shell commands here: the secret checks hold, and a search is sent to git grep alone.
+      ['Get-Content of the env file (deny)', 'deny', sh('Get-Content .env'), /\.env is a secret file/],
+      ['cat of the env file (deny)', 'deny', sh('cat .env')],
+      ['a recursive grep over the env file, sent to git grep (deny)', 'deny', sh('grep -rn KEY .'), /search with `git grep`, which skips ignored files/],
+      ['an argument-list command (deny)', 'deny', { tool_name: 'Bash', tool_input: { command: ['pwsh', '-NoProfile', '-Command', 'Get-Content .env'] } }],
+      ['a read from the call\'s working folder (deny)', 'deny', { tool_name: 'Bash', tool_input: { command: 'Get-Content local.settings.json', workdir: 'config' } }],
+      ['a read of a source file (allow)', 'allow', sh('Get-Content app/main.py')],
+      // A hook is never shown the call's shell; the hint picks Bash grammar for this one escaping-heavy case.
+      ['four nested shells (deny)', 'deny', sh(`bash -c 'bash -c "bash -c \\"bash -c terraform\\\\ apply\\""'`, 'bash'), /deeper than this guard reads/],
+      // A patch, file by file.
+      ['patch: add the env file (deny)', 'deny', ap('*** Add File: .env', '+KEY=x'), /would write it/],
+      ['patch: update the env file (deny)', 'deny', ap('*** Update File: .env', '@@', '+KEY=x')],
+      ['patch: delete the env file (deny)', 'deny', ap('*** Delete File: .env'), /would delete or move it/],
+      ['patch: move the env file away (deny)', 'deny', ap('*** Update File: .env', '*** Move to: old.env.txt'), /would delete or move it/],
+      ['patch: move a file onto the env file (deny)', 'deny', ap('*** Update File: app/main.py', '*** Move to: .env')],
+      ['patch: the env file with a trailing dot (deny)', 'deny', ap('*** Add File: .env.', '+KEY=x')],
+      ['patch: a private key (deny)', 'deny', ap('*** Add File: certs/new.key', '+x')],
+      ['patch: the example file (allow)', 'allow', ap('*** Add File: .env.example', '+KEY=')],
+      ["patch: the project's secret file from its folder (deny)", 'deny', { ...ap('*** Update File: local.settings.json', '@@', '+{}'), tool_input: { command: ['*** Begin Patch', '*** Update File: local.settings.json', '@@', '+{}', '*** End Patch'].join(NL), workdir: 'config' } }],
+      ['patch: a merged migration (deny)', 'deny', ap('*** Update File: db/migrations/001_init.sql', '@@', '+x'), /merged migration/],
+      ['patch: delete a merged migration (deny)', 'deny', ap('*** Delete File: db/migrations/001_init.sql'), /would delete or move it/],
+      ['patch: rename a merged migration (deny)', 'deny', ap('*** Update File: db/migrations/004_branch.sql', '*** Move to: db/migrations/004_b.sql')],
+      ["patch: this task's own migration (allow)", 'allow', ap('*** Update File: db/migrations/002_task.sql', '@@', '+x')],
+      ['patch: a new migration (allow)', 'allow', ap('*** Add File: db/migrations/005_next.sql', '+x')],
+      ['patch: a source file (allow)', 'allow', ap('*** Update File: app/main.py', '@@', '+y = 2')],
+      // What is typed into a running command reaches no hook: an interactive client or console is refused.
+      ['psql left open (deny)', 'deny', sh('psql -d app'), /interactive database session or console \(psql\)/],
+      ['psql with a statement (allow)', 'allow', sh('psql -d app -c "select 1"')],
+      ['psql reading a file on stdin (allow)', 'allow', sh('psql -d app < x.sql')],
+      ['a file piped into psql (allow)', 'allow', sh('Get-Content x.sql | psql -d app')],
+      ['psql in a container, interactive (deny)', 'deny', sh('docker exec -it db psql -U app')],
+      ['psql in a container with a statement (allow)', 'allow', sh('docker exec db psql -U app -c "select 1"')],
+      ['a shell left open in a container (deny)', 'deny', sh('docker compose exec db sh')],
+      ['psql behind cmd /c (deny)', 'deny', sh('cmd /c psql -d app')],
+      ['psql inside a script block (deny)', 'deny', sh('& { psql -d app }')],
+      ['psql inside Invoke-Command (deny)', 'deny', sh('Invoke-Command { psql -d app }')],
+      ['psql behind pwsh -nop -c (deny)', 'deny', sh('pwsh -nop -c psql')],
+      ['psql behind wsl with a distribution (deny)', 'deny', sh('wsl -d Ubuntu -- psql -U postgres')],
+      ['psql with a glued user name (deny)', 'deny', sh('psql -Ualice -d app')],
+      ['psql with a clustered -c (allow)', 'allow', sh('psql -qAtc "select 1" -d app')],
+      ['mysql with a glued password (deny)', 'deny', sh('mysql -uroot -psecret app')],
+      ['mysql with -e (allow)', 'allow', sh('mysql -uroot -e "select 1"')],
+      ['a shell in a container that runs psql (deny)', 'deny', sh('docker exec -it db sh -c psql')],
+      ['an image run with its own command, interactive (deny)', 'deny', sh('docker run -it --rm alpine')],
+      ['an image run detached (allow)', 'allow', sh('docker run --rm -d postgres:16')],
+      ['a compose run of a service (allow)', 'allow', sh('docker compose run --rm web')],
+      ['a Rails console in a container (deny)', 'deny', sh('docker compose exec web bin/rails console')],
+      ['a Django shell in a container (deny)', 'deny', sh('docker compose exec web python manage.py shell')],
+      ['tinker in a container (deny)', 'deny', sh('docker exec -it app php artisan tinker')],
+      ['a Flask shell with an app option (deny)', 'deny', sh('flask --app app shell')],
+      ['a Django shell behind py -3 (deny)', 'deny', sh('py -3 manage.py shell')],
+      ['a Django shell as a module (deny)', 'deny', sh('python -m django shell')],
+      ['an unbuffered Django migrate (allow)', 'allow', sh('python -u manage.py migrate')],
+      ['sqlite3 left open (deny)', 'deny', sh('sqlite3 app.db')],
+      ['sqlite3 with a dot command (allow)', 'allow', sh('sqlite3 app.db .tables')],
+      ['redis-cli left open (deny)', 'deny', sh('redis-cli -h localhost')],
+      ['redis-cli with a command (allow)', 'allow', sh('redis-cli PING')],
+      ['mongosh with --eval (allow)', 'allow', sh('mongosh --eval "db.stats()"')],
+      ['sqlcmd -q, which stays open (deny)', 'deny', sh('sqlcmd -S localhost -q "select 1"')],
+      ['a Django shell (deny)', 'deny', sh('python manage.py shell'), /manage\.py shell/],
+      ['a Django shell with -c (allow)', 'allow', sh('python manage.py shell -c "print(1)"')],
+      ['a Django migrate (allow)', 'allow', sh('python manage.py migrate')],
+      ['a Rails console (deny)', 'deny', sh('bundle exec rails c')],
+      ['tinker (deny)', 'deny', sh('php artisan tinker')],
+      ['a version check (allow)', 'allow', sh('psql --version')],
+      ['a word that only names a client (allow)', 'allow', sh('git log --grep psql')],
+    ], project);
+  }
+  // A misfilled list refuses every call there, naming the list: nothing else could tell anyone.
+  const misfilled = hookWith({ ...SAMPLE, SECRET_RAW: '["config/local' }, join(scratch, 'misfilled.mjs'));
+  if (committed && misfilled) {
+    runCodex(misfilled, [
+      ['a misfilled list refuses a harmless call (deny)', 'deny', sh('git status'), /SECRET_PATHS is not a JSON array.*until the developer fixes that list/i],
+      ['a misfilled list leaves a session start alone (allow)', 'allow', { hook_event_name: 'SessionStart', source: 'startup' }],
+    ], project);
+  }
+  // Past the walk cap the tree is unknown: the search is refused with a way to narrow it, not handed to the user.
+  const cappedCodex = sample && join(scratch, 'capped.mjs');
+  if (cappedCodex) {
+    runCodex(cappedCodex, [
+      ['a search over a tree past the cap (deny)', 'deny', sh('grep -rn KEY big'), /too large to check.*`git grep`/],
+      ['a deleting find over a tree past the cap (deny)', 'deny', sh('find big -name .env -delete'), /too large to check/],
+    ], project);
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
