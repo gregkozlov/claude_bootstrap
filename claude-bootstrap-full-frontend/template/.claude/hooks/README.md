@@ -76,7 +76,7 @@ node .claude/hooks/tests/guard-test.mjs
 node .claude/hooks/tests/guard-shell-test.mjs
 ```
 
-Each suite ends with `N passed, 0 failed`; the tests set `CLAUDE_PROJECT_DIR` themselves. The payloads are built in JavaScript on purpose - a Windows path or a dash typed into a shell argument gets mangled before the guard sees it. Add a case per `PROTECTED_PATHS` pattern (the two commented lines in `guard-test.mjs`); the matching itself, case folding and a misfilled list are tested on two temp copies of the guard with a known list, whatever this project's list is.
+Each suite ends with `N passed, 0 failed`; the tests set `CLAUDE_PROJECT_DIR` themselves. The payloads are built in JavaScript on purpose - a Windows path or a dash typed into a shell argument gets mangled before the guard sees it. Add a case per `PROTECTED_PATHS` pattern (the two commented lines in `guard-test.mjs`); the matching itself, case folding and a misfilled list are tested on two temp copies of the guard with a known list, whatever this project's list is. Each of the two suites ends with a block for `--harness codex`: `guard.mjs` also reads another harness's payloads behind that flag. Nothing in this layer starts it that way, and without the flag its behaviour is unchanged; the block keeps an edit to a shared check from breaking that form unseen.
 
 ## upkeep-nudge.mjs - the upkeep reminder
 

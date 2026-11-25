@@ -17,9 +17,21 @@
 // Registered in .claude/settings.json (tracked) - it is repo policy, like the deny list beside it.
 // Reads one JSON payload on stdin; exit 2 with the reason on stderr blocks the call, exit 0 allows it.
 // A guard that cannot parse its input allows the call: the deny list and the rules still stand behind it.
+// With `--harness codex` on its command line it reads OpenAI Codex's payloads instead - `Bash` whatever the shell,
+// `apply_patch` with the patch text - and refuses with JSON on stdout, exit 0. Every such branch tests CODEX; without
+// the flag nothing changes, and no Claude Code layer registers it that way.
 // Self-test: node .claude/hooks/tests/guard-test.mjs && node .claude/hooks/tests/guard-shell-test.mjs
-import { statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The Codex switch: `--harness codex` or `--harness=codex`. Stderr reaches nobody there, so a list that failed to parse
+// is kept in LIST_ERROR and refuses every call until it is fixed.
+const CODEX = process.argv.slice(2).some((arg, index, args) => /^--harness=codex$/i.test(arg) || (arg === '--harness' && /^codex$/i.test(args[index + 1] ?? '')));
+// Under Codex no variable carries the project root and the cwd may be a subfolder: the root is where this file is installed.
+const HOOK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+let LIST_ERROR;
 
 // Paths the agent must never hand-edit, as regex sources tested against the tool's file_path with every
 // backslash turned into "/" first - write them with forward slashes, matching the path's tail, e.g.
@@ -40,7 +52,8 @@ function regexList(name, raw) {
     if (!Array.isArray(sources) || !sources.every((source) => typeof source === 'string')) throw new Error('not an array of strings');
     return sources.map((source) => new RegExp(source, PATH_FLAGS));
   } catch (error) {
-    process.stderr.write(`guard.mjs: ${name} is not a JSON array of regex sources (${error.message}); it protects nothing until it is fixed.\n`);
+    if (CODEX) LIST_ERROR = `${name} is not a JSON array of regex sources (${error.message})`;
+    else process.stderr.write(`guard.mjs: ${name} is not a JSON array of regex sources (${error.message}); it protects nothing until it is fixed.\n`);
     return [];
   }
 }
@@ -126,6 +139,9 @@ const PROBE_PATH = new RegExp(String.raw`^${SRC_RE}\/__hunt_probe[^/]*\.ts$`);
 const DELETER = /^(?:rm|del|erase|ri|rd|rmdir|Remove-Item|unlink)$/i;
 const GIT_DIR = /(?:^|[\\/])\.git(?:[\\/]|$)/;
 const SHELL_PROTECTED = /(?:^|[\\/])\.claude[\\/](?:hooks(?:[\\/]|$)|settings(?:\.local)?\.json$)/i;
+// Under Codex the layer's own files, tested on a path with forward slashes: the hooks, their registration, the command
+// rules, the agents, and the project's Codex config, which can switch hooks off.
+const CODEX_LAYER = /(?:^|\/)\.codex\/(?:hooks(?:\/|$)|hooks\.json$|rules(?:\/|$)|agents(?:\/|$)|config\.toml$)/i;
 // rm's own short flags, so `-Rf` counts and PowerShell's `-Force` does not; `-Re...` is -Recurse, and `//s` is cmd's `/s`
 // from Git Bash, which strips one slash; cmd also takes its switches clustered, `/s/q` or `/q//s`.
 const RECURSIVE_FLAG =
@@ -165,6 +181,22 @@ const DASH = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`);
 // project-relative path with forward slashes, `what` names it in the refusal).
 const PROBE_FENCE = { allowed: PROBE_PATH, what: 'its compile probe (<SRC_DIR>/__hunt_probe*.ts)' };
 const FENCED_AGENTS = new Map([['hunt', PROBE_FENCE]]);
+// Under Codex an agent has no tool list, so the fence is what keeps a read-only agent read-only: no project path for the
+// reviewers and the built-in explorer, and for an editor agent a plain `*** Update File` only. An entry with `says`
+// words its own refusal; a project's own editor agent gets an UPDATE_ONLY_FENCE entry.
+const READ_ONLY_FENCE = { allowed: /^(?!)/, says: 'is read-only here: it may not write or remove anything inside the project' };
+const UPDATE_ONLY_FENCE = { allowed: /^(?!)/, updates: true, says: 'may only change an existing file with a plain `*** Update File` patch inside the project' };
+const CODEX_FENCED_AGENTS = new Map([
+  ['hunt', PROBE_FENCE],
+  ['drift', READ_ONLY_FENCE],
+  ['gate', READ_ONLY_FENCE],
+  ['twins', READ_ONLY_FENCE],
+  ['explorer', READ_ONLY_FENCE],
+  ['comments', UPDATE_ONLY_FENCE],
+]);
+// Under Codex path-scoped rules are the guard's own: the rule files, and where it notes which ones a session was shown.
+const RULES_DIR = '.ai-layer/rules';
+const RULE_MARKERS = path.join(os.tmpdir(), 'ai-layer-rules');
 const MAX_BODY_DEPTH = 3;
 const GIT_REFUSAL =
   'Blocked by .claude/hooks/guard.mjs: this git verb commits, stages, publishes, rewrites or discards work. CLAUDE.md: apply file changes only and leave them in the working tree - the author commits.';
@@ -176,8 +208,39 @@ async function readStdin() {
 }
 
 function deny(reason) {
+  if (CODEX) {
+    const said = codexWording(reason);
+    try {
+      writeSync(1, `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: said } })}\n`);
+    } catch {
+      // Stdout is gone: exit 2 with the reason on stderr is Codex's second refusal form, where the hook's shell keeps the code.
+      process.stderr.write(`${said}\n`);
+      process.exit(2);
+    }
+    process.exit(0);
+  }
   process.stderr.write(`${reason}\n`);
   process.exit(2);
+}
+
+// The refusals are written once, in Claude Code's words; under Codex the same sentence names that tool's files.
+function codexWording(reason) {
+  return reason
+    .split('.claude/hooks/guard.mjs')
+    .join('.codex/hooks/guard.mjs')
+    .split('CLAUDE.md')
+    .join('AGENTS.md')
+    .split('with Edit or Write')
+    .join('with apply_patch')
+    .split('the session scratchpad or /tmp')
+    .join('the temp directory')
+    .split('under the scratchpad')
+    .join('under the temp directory');
+}
+
+function fenceRefusal(fence, target) {
+  if (fence.says) return `Blocked by .claude/hooks/guard.mjs: ${fence.agent} ${fence.says}, not ${target}.`;
+  return `Blocked by .claude/hooks/guard.mjs: ${fence.agent} may write or remove only ${fence.what} inside the project, not ${target}.`;
 }
 
 function escapeChar(shell) {
@@ -899,7 +962,7 @@ function checkMovers(segment, context) {
     }
     if (isScratchTarget(target)) continue;
     if (context.fence && !fencedPath(target, context.cwd, context.fence.allowed)) {
-      deny(`Blocked by .claude/hooks/guard.mjs: ${context.fence.agent} may write or remove only ${context.fence.what} inside the project, not "${target}".`);
+      deny(fenceRefusal(context.fence, `"${target}"`));
     }
     const normal = normalizedPath(target);
     if (MOVER_EXEMPT.test(normal)) continue;
@@ -908,7 +971,7 @@ function checkMovers(segment, context) {
       deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" on the directory "${target}" deletes every file in it. CLAUDE.md, Shell and file edits: an orphaned file is deleted one path at a time.`);
     }
     // The one shell operation on a project file that is granted: a single non-recursive delete of an unprotected path.
-    if (DELETER.test(verb) && !recursive && !isProtected(normal) && !GIT_DIR.test(normal) && !SHELL_PROTECTED.test(normal)) {
+    if (DELETER.test(verb) && !recursive && !guardedPath(target, context.cwd)) {
       continue;
     }
     deny(`Blocked by .claude/hooks/guard.mjs: "${verb}" would write or remove "${target}". CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write; scratch output goes under the session scratchpad or /tmp.`);
@@ -1179,13 +1242,55 @@ function nativePath(target) {
 }
 
 function projectRoot(cwd) {
+  if (CODEX) return path.resolve(process.env.CLAUDE_PROJECT_DIR || HOOK_ROOT);
   return path.resolve(process.env.CLAUDE_PROJECT_DIR || cwd || process.cwd());
+}
+
+// The path with its deepest existing ancestor resolved through links: Node realpaths this file's own location, while
+// the harness may spell the same folder through a link or a junction.
+function canonical(target) {
+  let head = path.resolve(target);
+  const tail = [];
+  for (;;) {
+    try {
+      return path.join(realpathSync.native(head), ...tail);
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return path.resolve(target);
+      tail.unshift(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
+function within(base, target) {
+  return target === base || target.startsWith(base.endsWith(path.sep) ? base : `${base}${path.sep}`);
 }
 
 function insideProject(filePath, cwd) {
   const root = projectRoot(cwd).toLowerCase();
   const resolved = path.resolve(cwd || process.cwd(), nativePath(filePath)).toLowerCase();
-  return resolved === root || resolved.startsWith(root.endsWith(path.sep) ? root : `${root}${path.sep}`);
+  if (within(root, resolved)) return true;
+  return CODEX && within(canonical(projectRoot(cwd)).toLowerCase(), canonical(path.resolve(cwd || process.cwd(), nativePath(filePath))).toLowerCase());
+}
+
+// The path from the project root, forward slashes; under Codex a relative path starts at a cwd that may be a subfolder.
+function projectRelative(target, cwd) {
+  const absolute = path.resolve(cwd || process.cwd(), nativePath(target));
+  const lexical = path.relative(projectRoot(cwd), absolute);
+  const relative = lexical.startsWith('..') || path.isAbsolute(lexical) ? path.relative(canonical(projectRoot(cwd)), canonical(absolute)) : lexical;
+  return relative.replace(/\\/g, '/');
+}
+
+// What neither the delete grant nor a patch may touch: a PROTECTED_PATHS match, `.git`, the hooks and the settings.
+// Under Codex also the layer's own files, each judged as typed and as the path resolves from the project root.
+function guardedPath(target, cwd) {
+  const normal = normalizedPath(target);
+  if (isProtected(normal) || GIT_DIR.test(normal) || SHELL_PROTECTED.test(normal)) return true;
+  if (!CODEX) return false;
+  const relative = projectRelative(target, cwd);
+  const absolute = path.resolve(cwd || process.cwd(), nativePath(target));
+  return CODEX_LAYER.test(normal) || CODEX_LAYER.test(relative) || isProtected(absolute) || GIT_DIR.test(relative) || SHELL_PROTECTED.test(relative);
 }
 
 function isDirectory(target, cwd) {
@@ -1223,6 +1328,10 @@ function isOutsideProject(target) {
   const resolved = path.resolve(nativePath(plain.replace(/\/[^/]*[*?[].*$/, '/'))).toLowerCase();
   const root = projectRoot(undefined).toLowerCase();
   if (root.startsWith(resolved.endsWith(path.sep) ? resolved : `${resolved}${path.sep}`)) return false;
+  if (CODEX) {
+    const real = canonical(nativePath(plain.replace(/\/[^/]*[*?[].*$/, '/'))).toLowerCase();
+    if (canonical(projectRoot(undefined)).toLowerCase().startsWith(real.endsWith(path.sep) ? real : `${real}${path.sep}`)) return false;
+  }
   return !insideProject(nativePath(plain), undefined);
 }
 
@@ -1374,8 +1483,268 @@ function checkWrite(input, context) {
   }
 }
 
+// ---- OpenAI Codex: everything from here to the main block runs only under the switch. ----
+
+// The grammar a Codex `Bash` call is judged by: the shell the call names when it names one, otherwise the platform's.
+function codexShell(tool, named) {
+  const name = toolName(Array.isArray(named) ? named[0] : typeof named === 'string' ? named : '').toLowerCase();
+  if (/^(?:bash|sh|zsh|dash|ksh)$/.test(name)) return 'Bash';
+  if (/^(?:pwsh|powershell)$/.test(name)) return 'PowerShell';
+  if (name === 'cmd') return 'cmd';
+  return tool === 'PowerShell' || process.platform === 'win32' ? 'PowerShell' : 'Bash';
+}
+
+// A command handed over as an argument list, written back as the one line a shell would get: every word that is not
+// plain goes into double quotes, so `node -e <code>` and `bash -lc <script>` are read as they run.
+function commandLine(parts, shell) {
+  const escape = shell === 'PowerShell' ? '`' : '\\';
+  const special = shell === 'PowerShell' ? /[`"$]/g : /[\\"$`]/g;
+  return parts
+    .filter((part) => typeof part === 'string')
+    .map((part) => (/^[\w@%+=:,./\\-]+$/.test(part) ? part : `"${part.replace(special, (ch) => escape + ch)}"`))
+    .join(' ');
+}
+
+// Every file a patch names. Headers are read with padding and in any case, wider than the grammar, so a path the
+// engine would accept is never missed; a `Move to` belongs to the `Update File` above it.
+function patchOps(text) {
+  const ops = [];
+  let current;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const head = /^\s*\*\*\* (Add File|Update File|Delete File|Move to):\s*(.+?)\s*$/i.exec(line);
+    if (head && /^move to$/i.test(head[1])) {
+      if (current?.kind === 'update' && current.moveTo === undefined) current.moveTo = head[2];
+      else ops.push((current = { kind: 'add', path: head[2], added: [] }));
+    } else if (head) {
+      ops.push((current = { kind: head[1].split(' ')[0].toLowerCase(), path: head[2], added: [] }));
+    } else if (current && line.startsWith('+')) {
+      current.added.push(line.slice(1));
+    }
+  }
+  return ops;
+}
+
+// A patch is judged file by file: a written path as Edit / Write are, a removed one (Delete File, the source of a
+// Move) as the shell delete grant is. Returns the project paths it writes, for the path rules.
+function checkPatch(text, context) {
+  const ops = typeof text === 'string' ? patchOps(text) : [];
+  if (ops.length === 0) {
+    deny('Blocked by .claude/hooks/guard.mjs: no `*** Add File:`, `*** Update File:` or `*** Delete File:` header was found in this patch, so it cannot be judged. Send the patch in that form.');
+  }
+  const inside = (target) => insideProject(target, context.cwd);
+  const written = ops.filter((op) => op.kind !== 'delete').map((op) => ({ target: op.moveTo ?? op.path, plain: op.kind === 'update' && op.moveTo === undefined }));
+  const removed = ops.filter((op) => op.kind === 'delete' || op.moveTo !== undefined).map((op) => op.path);
+  for (const { target, plain } of written) {
+    if (isProtected(target) || isProtected(path.resolve(context.cwd || process.cwd(), nativePath(target)))) {
+      deny(`Blocked by .claude/hooks/guard.mjs: ${target} is generated or externally owned (PROTECTED_PATHS). CLAUDE.md: never hand-edit it - regenerate, or report the problem at its source.`);
+    }
+    if (!inside(target)) continue;
+    if (guardedPath(target, context.cwd)) {
+      deny(`Blocked by .claude/hooks/guard.mjs: "${target}" is under .git or is one of the layer's own files (.codex/hooks, hooks.json, rules, agents, config.toml). The developer changes those, not a session - say what should change.`);
+    }
+    if (context.fence && !(context.fence.updates ? plain : fencedPath(target, context.cwd, context.fence.allowed))) {
+      deny(fenceRefusal(context.fence, `"${target}"`));
+    }
+  }
+  for (const target of removed) {
+    if (!inside(target)) continue;
+    if (!NODE_MODULES.test(normalizedPath(target))) context.deleted.add(projectRelative(target, context.cwd).toLowerCase());
+    if (context.deleted.size > 1) {
+      deny('Blocked by .claude/hooks/guard.mjs: this patch removes more than one project path. CLAUDE.md, Shell and file edits: an orphaned file is deleted one path at a time.');
+    }
+    if (guardedPath(target, context.cwd)) {
+      deny(`Blocked by .claude/hooks/guard.mjs: this patch would remove "${target}", a generated or externally owned path, a path under .git or one of the layer's own files. The developer removes those, not a session.`);
+    }
+    if (context.fence && !fencedPath(target, context.cwd, context.fence.allowed)) {
+      deny(fenceRefusal(context.fence, `"${target}"`));
+    }
+  }
+  const projectWrites = written.filter(({ target }) => inside(target)).map(({ target }) => target);
+  // Every added line of the patch, whichever header it follows: a padded header look-alike must not take lines out of the check.
+  if (projectWrites.length > 0) {
+    for (const op of ops) {
+      for (const line of op.added) {
+        if (DASH.test(line) && !/plain hyphen/.test(line)) {
+          deny(`Blocked by .claude/hooks/guard.mjs: a line written to ${op.moveTo ?? op.path} contains a dash character. CLAUDE.md, Punctuation: plain hyphens only, everywhere. The line: ${line.trim().slice(0, 120)}`);
+        }
+      }
+    }
+  }
+  return projectWrites;
+}
+
+function expandBraces(glob) {
+  const open = glob.indexOf('{');
+  const close = open < 0 ? -1 : glob.indexOf('}', open);
+  if (close < 0 || glob.slice(open + 1, close).includes('{')) return [glob];
+  return glob
+    .slice(open + 1, close)
+    .split(',')
+    .flatMap((alternative) => expandBraces(glob.slice(0, open) + alternative + glob.slice(close + 1)));
+}
+
+// A rule glob as Claude Code's rule loader reads one, so a rule file reaches the same files under both tools: a
+// trailing `/**` is stripped first; what is left matches from the root when it holds a slash and at any depth when it
+// does not; a match on a folder covers everything under it.
+function globRegex(glob) {
+  const rooted = glob.startsWith('/');
+  let body = glob.replace(/^\.?\//, '').replace(/\/+$/, '');
+  if (body.endsWith('/**')) body = body.slice(0, -3);
+  let source = '';
+  for (let index = 0; index < body.length; index += 1) {
+    const ch = body[index];
+    if (ch === '*' && body[index + 1] === '*') {
+      const slash = body[index + 2] === '/';
+      source += slash ? '(?:.*/)?' : '.*';
+      index += slash ? 2 : 1;
+    } else if (ch === '*') source += '[^/]*';
+    else if (ch === '?') source += '[^/]';
+    else if (ch === '[' && body.indexOf(']', index + 2) > 0) {
+      const close = body.indexOf(']', index + 2);
+      source += `[${body.slice(index + 1, close).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`;
+      index = close;
+    } else source += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${rooted || body.includes('/') ? '' : '(?:.*/)?'}${source}(?:/.*)?$`, PATH_FLAGS);
+}
+
+// Every `*.md` in RULES_DIR is a rule. Its globs are the items of the `paths:` block list in its frontmatter; with no
+// such list it reaches every path, as a rule without `paths:` loads in every session.
+function loadRules(root) {
+  let files;
+  try {
+    files = readdirSync(path.join(root, RULES_DIR)).filter((file) => file.endsWith('.md')).sort();
+  } catch {
+    return [];
+  }
+  return files.flatMap((file) => {
+    let text;
+    try {
+      text = readFileSync(path.join(root, RULES_DIR, file), 'utf8');
+    } catch {
+      return [];
+    }
+    const lines = /^﻿?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1].split(/\r?\n/) ?? [];
+    const at = lines.findIndex((line) => /^paths\s*:/.test(line));
+    const globs = [];
+    for (const line of at < 0 ? [] : lines.slice(at + 1)) {
+      if (/^[^\s#-]/.test(line)) break;
+      const item = /^\s*-\s+(['"]?)(.+?)\1\s*$/.exec(line)?.[2];
+      if (item) globs.push(item);
+    }
+    return [{ file: `${RULES_DIR}/${file}`, marker: file.replace(/[^\w.-]/g, '_'), globs: globs.length > 0 ? globs : undefined }];
+  });
+}
+
+function rulesFor(relatives, root) {
+  const reaches = (rule, file) => rule.globs === undefined || rule.globs.some((glob) => expandBraces(glob).some((alternative) => globRegex(alternative).test(file)));
+  return loadRules(root).filter((rule) => relatives.some((file) => reaches(rule, file)));
+}
+
+// A session id or agent id becomes a folder name: anything but a plain token is treated as absent.
+function markerId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value) ? value : undefined;
+}
+
+// Codex scopes instructions by directory only, so the guard carries the path rules: once every other check has
+// passed, the first patch that writes a path a rule reaches is refused with the rule file to read - once per session
+// and agent. Where that cannot be noted, nothing is refused and the same sentence rides along as context.
+function ruleGate(targets, payload, context) {
+  if (targets.length === 0) return;
+  const relatives = targets.map((target) => projectRelative(target, context.cwd));
+  const session = markerId(payload.session_id);
+  const folder = session ? path.join(RULE_MARKERS, session, markerId(payload.agent_id) ?? 'main') : undefined;
+  const fresh = rulesFor(relatives, projectRoot(context.cwd)).filter((rule) => !folder || !existsSync(path.join(folder, rule.marker)));
+  if (fresh.length === 0) return;
+  const sentence = `Path rules apply to ${relatives.join(', ')}: read ${fresh.map((rule) => rule.file).join(', ')} in full, then retry this patch.`;
+  let noted = folder !== undefined;
+  try {
+    if (folder) {
+      mkdirSync(folder, { recursive: true });
+      for (const rule of fresh) writeFileSync(path.join(folder, rule.marker), '');
+    }
+  } catch {
+    noted = false;
+  }
+  if (noted) deny(`Blocked by .claude/hooks/guard.mjs: ${sentence} A rule file is named once per session.`);
+  try {
+    writeSync(1, `${JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: sentence } })}\n`);
+  } catch {
+    // Nothing left to say it through.
+  }
+}
+
+// A compacted or cleared session has lost the rule text it read: its notes go, and so do folders nobody used for two weeks.
+function forgetRules(payload) {
+  try {
+    const session = markerId(payload.session_id);
+    if (session && (payload.source === 'compact' || payload.source === 'clear')) rmSync(path.join(RULE_MARKERS, session), { recursive: true, force: true });
+    const stale = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    for (const name of readdirSync(RULE_MARKERS)) {
+      if (statSync(path.join(RULE_MARKERS, name)).mtimeMs < stale) rmSync(path.join(RULE_MARKERS, name), { recursive: true, force: true });
+    }
+  } catch {
+    // No notes yet, or a folder in use: nothing to forget.
+  }
+}
+
+function codexCall(payload) {
+  if (payload.hook_event_name === 'SessionStart') {
+    forgetRules(payload);
+    return;
+  }
+  if (payload.hook_event_name !== undefined && payload.hook_event_name !== 'PreToolUse') return;
+  if (LIST_ERROR) {
+    deny(`Blocked by .claude/hooks/guard.mjs: ${LIST_ERROR} in .claude/hooks/guard.mjs. Until the developer fixes that list the guard refuses every call - tell them, and do not work around it.`);
+  }
+  // The guard of one tree run for a session in another would call that tree's files outside the project and pass them.
+  if (typeof payload.cwd === 'string' && !insideProject(payload.cwd, payload.cwd)) {
+    deny(`Blocked by .claude/hooks/guard.mjs: this guard protects ${projectRoot()} and the session runs in ${payload.cwd}, outside it. Start the session inside that project, or install the layer in this one.`);
+  }
+  const tool = payload.tool_name;
+  const input = payload.tool_input ?? {};
+  const workdir = [input.workdir, input.cwd].find((value) => typeof value === 'string' && value);
+  const fence = CODEX_FENCED_AGENTS.get(payload.agent_type);
+  const context = {
+    cwd: workdir ? path.resolve(payload.cwd || process.cwd(), nativePath(workdir)) : payload.cwd,
+    shell: codexShell(tool, input.shell),
+    fence: fence ? { agent: payload.agent_type, ...fence } : undefined,
+    deleted: new Set(),
+  };
+  if (tool === 'apply_patch' || tool === 'Edit' || tool === 'Write') {
+    const patch = [input.command, input.patch, input.input].find((value) => typeof value === 'string');
+    ruleGate(checkPatch(patch, context), payload, context);
+  } else if (tool === 'Bash' || tool === 'PowerShell') {
+    const { shell } = context;
+    const typed = typeof input.command === 'string' ? input.command : Array.isArray(input.command) ? commandLine(input.command, shell) : undefined;
+    if (typed === undefined) return;
+    // First, so its own reason is the one given: a patch through the shell is a write no check below can read.
+    if (segments(typed, shell).some((segment) => /^(?:apply_patch|applypatch)$/i.test(toolName(commandWords(segment, shell)[0])))) {
+      deny('Blocked by .claude/hooks/guard.mjs: a patch sent through the shell, which this guard cannot read. Send it with the apply_patch tool itself.');
+    }
+    const command = withLeadingLiterals(withMktempNames(typed, shell), shell);
+    for (const view of new Set([command, commentsBlanked(command, shell)])) {
+      checkChdir(view, shell);
+      checkCommand(view, context);
+    }
+  }
+}
+
+// `node guard.mjs --harness codex --rules-for <file>...` prints the rule files that reach those paths: a reviewer
+// never patches, so whoever briefs it reads the rules for the changed files here.
+if (CODEX && process.argv.includes('--rules-for')) {
+  const files = process.argv.slice(process.argv.indexOf('--rules-for') + 1).filter((arg) => !arg.startsWith('--'));
+  for (const rule of rulesFor(files.map((file) => projectRelative(file, process.cwd())), projectRoot())) console.log(rule.file);
+  process.exit(0);
+}
+
 try {
   const payload = JSON.parse(await readStdin());
+  if (CODEX) {
+    codexCall(payload);
+    process.exit(0);
+  }
   const tool = payload.tool_name;
   const input = payload.tool_input ?? {};
   // Without an agent type in the payload the fence does not apply - fail open, the prompt still carries it.

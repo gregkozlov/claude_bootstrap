@@ -15,6 +15,7 @@ An edit to one of these is made in every copy, and `cmp` proves it. Paths are un
 - **Full and light frontend:** also `skills/maintain-ai-layer/references/init.md`. It names units this layer lacks (`lifecycle`, `crosscheck`, `verify-live`) on purpose: it runs a step only when the unit exists.
 - **Light frontend and light backend:** also `hooks/guard.mjs`, `skills/handoff/SKILL.md`, `skills/retro/SKILL.md`.
 - `hooks/guard.mjs` in the full layer differs from the light layers' copy in comment lines only, about the write fence (below): a code change to it goes into all three.
+- `hooks/guard.mjs` also carries OpenAI Codex's input and output form behind `--harness codex`, which no Claude Code layer registers. What that means for an edit is in the full layer's [MAINTAINERS.md](../claude-bootstrap-full-frontend/MAINTAINERS.md), "The Codex switch in `guard.mjs`".
 
 ## The numbers that must agree
 

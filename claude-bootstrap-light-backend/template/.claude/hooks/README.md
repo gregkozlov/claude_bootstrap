@@ -96,7 +96,7 @@ Every case line must read `ok`, and each suite ends with `N passed, 0 failed`. *
 
 `backend-guard-test.mjs` runs in three parts: the built-in checks against the installed hook, the three project lists against a copy of the hook with sample values in a throwaway git repo in the temp directory (the frozen cases make commits and remote refs of their own there, never in this tree), and the same copy with the lists unfilled. A case expects `0` (allowed, nothing printed), `2` (refused) or `'ask'` (the user is prompted). It needs `git` on the path.
 
-Add one case per entry of each project list - `guard-test.mjs` carries two commented lines showing the shape, `backend-guard-test.mjs` two more at the end of its first part. Run the suites after every change to a hook or to a list. A regex that does not compile takes the whole hook down, and a hook that crashes lets every call through.
+Add one case per entry of each project list - `guard-test.mjs` carries two commented lines showing the shape, `backend-guard-test.mjs` two more at the end of its first part. Run the suites after every change to a hook or to a list. A regex that does not compile takes the whole hook down, and a hook that crashes lets every call through. Each of the two `guard` suites ends with a block for `--harness codex`: `guard.mjs` also reads another harness's payloads behind that flag. Nothing in this layer starts it that way, and without the flag its behaviour is unchanged; the block keeps an edit to a shared check from breaking that form unseen.
 
 ## Switching a rule off
 

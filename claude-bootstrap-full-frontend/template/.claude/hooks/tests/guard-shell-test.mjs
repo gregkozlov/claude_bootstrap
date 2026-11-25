@@ -1,5 +1,6 @@
 // Self-test for guard.mjs, Bash / PowerShell payloads: git verbs, read git that runs or writes, gh, movers and the
-// delete grant, in-place edits, redirect targets, leading-literal variables, the working directory and comments.
+// delete grant, in-place edits, redirect targets, leading-literal variables, the working directory and comments;
+// then the same guard under `--harness codex`, where every shell call is `Bash` and a refusal is JSON on stdout.
 //   node .claude/hooks/tests/guard-shell-test.mjs
 // Every line must read "ok".
 import { spawnSync } from 'node:child_process';
@@ -410,6 +411,85 @@ for (const [name, want, command, cwd = root] of cases) {
   if (!ok) failed += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(44)} exit ${r.status}  ${(r.stderr ?? '').trim().slice(0, 50)}`);
 }
+
+// The Codex form: the same guard started with `--harness codex`. Every shell call arrives as `Bash` whatever the
+// shell, so the grammar is the platform's - PowerShell on Windows, Bash elsewhere - unless the call names its shell.
+// A refusal is JSON on stdout with exit 0. [name, 'deny' | 'allow', a command or the whole tool_input, extra payload, reason]
+const rm = WIN ? 'Remove-Item' : 'rm';
+const as = (agent_type) => ({ agent_type, agent_id: `agent-${agent_type}` });
+const codexCases = [
+  ['codex: git status (allow)', 'allow', 'git status --short'],
+  ['codex: git commit (deny)', 'deny', 'git commit -m "x"', {}, /AGENTS\.md: apply file changes only/],
+  ['codex: git -C . commit (deny)', 'deny', 'git -C . commit -m x'],
+  ['codex: git commit with stderr folded in (deny)', 'deny', 'git commit -m x 2>&1'],
+  ['codex: gh pr create (deny)', 'deny', 'gh pr create --title x'],
+  ['codex: the check command (allow)', 'allow', 'npm run check 2>&1'],
+  // the platform's grammar, and the shell a call names
+  ['codex: a subshell cd, by the platform grammar', WIN ? 'deny' : 'allow', '(cd x && ls)'],
+  ['codex: a subshell cd in a call that names bash (allow)', 'allow', { command: '(cd x && ls)', shell: '/usr/bin/bash' }],
+  ['codex: a subshell cd in a call that names pwsh (deny)', 'deny', { command: '(cd x && ls)', shell: 'C:/Program Files/PowerShell/7/pwsh.exe' }],
+  ['codex: Set-Location (deny)', 'deny', 'Set-Location x'],
+  ...(WIN
+    ? [
+        ['codex: a quoted path ending in a backslash hides nothing (deny)', 'deny', 'Get-ChildItem "C:\\x\\"; git commit -m "x"'],
+        ['codex: reading a file (allow)', 'allow', "Get-Content -LiteralPath '.agents/skills/debug/SKILL.md'"],
+        ['codex: a read-back pipeline (allow)', 'allow', "Get-Item -LiteralPath 'notes/a.txt','notes/b.txt' | ForEach-Object { '{0}: {1}' -f $_.Name, ((Get-Content -LiteralPath $_.FullName) -join ' | ') }"],
+        ['codex: a redirect to $null (allow)', 'allow', 'npm ls > $null'],
+      ]
+    : [['codex: a redirect to /dev/null (allow)', 'allow', 'npm ls > /dev/null']]),
+  ['codex: Set-Content into the tree (deny)', 'deny', 'Set-Content -Path AGENTS.md -Value "x"', {}, /changed with apply_patch/],
+  ['codex: a redirect into the tree (deny)', 'deny', 'npm ls > deps.txt', {}, /the temp directory/],
+  // the layer's own files, as typed and as the path resolves from a subfolder or a named working directory
+  ['codex: delete a hook (deny)', 'deny', `${rm} .codex/hooks/guard.mjs`],
+  ['codex: delete hooks.json (deny)', 'deny', `${rm} .codex/hooks.json`],
+  ['codex: delete the command rules (deny)', 'deny', `${rm} .codex/rules/git.rules`],
+  ['codex: delete an agent (deny)', 'deny', `${rm} .codex/agents/hunt.toml`],
+  ['codex: delete the Codex config (deny)', 'deny', `${rm} .codex/config.toml`],
+  ['codex: delete a hook from inside its folder (deny)', 'deny', `${rm} guard.mjs`, { cwd: `${rootPath}/.codex/hooks` }],
+  ['codex: delete a hook through a working directory (deny)', 'deny', { command: `${rm} guard.mjs`, workdir: '.codex/hooks' }],
+  ['codex: delete inside .git from inside it (deny)', 'deny', `${rm} config`, { cwd: `${rootPath}/.git` }],
+  ['codex: copy over a hook (deny)', 'deny', 'cp /tmp/guard.mjs .codex/hooks/guard.mjs'],
+  ['codex: delete one skill note (allow)', 'allow', `${rm} .agents/skills/x/notes.md`],
+  ['codex: delete one source file (allow)', 'allow', `${rm} <SRC_DIR>/a.ts`],
+  // a patch belongs to the apply_patch tool, where the guard reads it
+  ['codex: apply_patch behind a pipe (deny)', 'deny', 'echo x | apply_patch', {}, /apply_patch tool itself/],
+  ['codex: apply_patch fed a heredoc (deny)', 'deny', "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: a.md\n+b => c > d\n*** End Patch\nEOF", {}, /apply_patch tool itself/],
+  ['codex: apply_patch as an argument list (deny)', 'deny', { command: ['apply_patch', '*** Begin Patch\n*** Add File: a.md\n+x\n*** End Patch'] }, {}, /apply_patch tool itself/],
+  // a command handed over as an argument list is read as the line a shell would get
+  ['codex: an argument list running git commit (deny)', 'deny', { command: ['bash', '-lc', 'git commit -m x'] }],
+  ['codex: an argument list with a one-liner write (deny)', 'deny', { command: ['node', '-e', "require('fs').writeFileSync('<SRC_DIR>/a.ts','x')"] }],
+  ['codex: an argument list search naming git commit (allow)', 'allow', { command: ['rg', 'git commit', '<SRC_DIR>'] }],
+  // the write fence by agent type
+  ['codex: drift deletes a project file (deny)', 'deny', `${rm} <SRC_DIR>/a.ts`, as('drift'), /drift is read-only here/],
+  ['codex: explorer deletes a project file (deny)', 'deny', `${rm} <SRC_DIR>/a.ts`, as('explorer')],
+  ['codex: comments deletes a project file (deny)', 'deny', `${rm} <SRC_DIR>/a.ts`, as('comments')],
+  ['codex: hunt deletes its probe (allow)', 'allow', `${rm} <SRC_DIR>/__hunt_probe.ts`, as('hunt')],
+  ['codex: hunt deletes a source file (deny)', 'deny', `${rm} <SRC_DIR>/a.ts`, as('hunt')],
+  ['codex: drift copies out of the tree (allow)', 'allow', `cp <SRC_DIR>/a.ts ${temp}/a.ts`, as('drift')],
+  ['codex: an unfenced agent deletes one file (allow)', 'allow', `${rm} <SRC_DIR>/a.ts`, as('worker')],
+];
+const CLAUDE_WORDS = /CLAUDE|\.claude[\\/]|Edit or Write|scratchpad/;
+for (const [name, want, input, extra = {}, reason] of codexCases) {
+  const r = spawnSync('node', [guard, '--harness', 'codex'], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'suite', tool_name: 'Bash', tool_input: typeof input === 'string' ? { command: input } : input, cwd: root, ...extra }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    timeout: 10000,
+  });
+  let said = {};
+  try {
+    said = r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput : {};
+  } catch {
+    said = { permissionDecision: 'unreadable' };
+  }
+  const text = said.permissionDecisionReason ?? '';
+  const verdict = said.permissionDecision ?? 'allow';
+  // The wording check reads the sentence, not the paths in it.
+  const sentence = [root, rootPath].reduce((rest, folder) => rest.split(folder).join(''), text);
+  const ok = r.status === 0 && verdict === want && (!reason || reason.test(text)) && !CLAUDE_WORDS.test(sentence);
+  if (!ok) failed += 1;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(44)} exit ${r.status}  ${verdict}  ${text.slice(0, 50)}`);
+}
 rmSync(brackets, { recursive: true, force: true });
-console.log(`${cases.length - failed} passed, ${failed} failed`);
+console.log(`${cases.length + codexCases.length - failed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

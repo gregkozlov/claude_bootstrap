@@ -26,7 +26,7 @@ The same units the light frontend layer drops, for the same reasons - that folde
 
 `guard.mjs`, `tests/guard-test.mjs`, `tests/guard-shell-test.mjs`, `upkeep-nudge.mjs`, `tests/upkeep-nudge-test.mjs`, `skills/handoff/SKILL.md`, `skills/retro/SKILL.md`, `skills/maintain-ai-layer/layer-refs.mjs` and `skills/maintain-ai-layer/references/settled.md`. A change to one goes into both layers in the same commit; `cmp` proves it.
 
-`guard.mjs` is also the full layer's guard, so two things in it do little here. The write fence that keeps `hunt` to a compile probe (`FENCED_AGENTS`) only narrows `hunt`'s Bash movers, since `hunt` has no Edit or Write in this layer. The one dependency folder a shell mover may touch is the JavaScript one. They stay so the file remains diffable against the full layer's.
+`guard.mjs` is also the full layer's guard, so two things in it do little here. The write fence that keeps `hunt` to a compile probe (`FENCED_AGENTS`) only narrows `hunt`'s Bash movers, since `hunt` has no Edit or Write in this layer. The one dependency folder a shell mover may touch is the JavaScript one. They stay so the file remains diffable against the full layer's. It also carries OpenAI Codex's input and output form behind `--harness codex`, which no Claude Code layer registers: the full layer's [MAINTAINERS.md](../claude-bootstrap-full-frontend/MAINTAINERS.md), "The Codex switch in `guard.mjs`", says what that means for an edit.
 
 ## Install modes
 

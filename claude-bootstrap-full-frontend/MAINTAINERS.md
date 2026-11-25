@@ -43,6 +43,14 @@ An edit to one of these is made in every copy, and `cmp` proves it. Paths are un
 - **Light frontend and light backend:** also `hooks/guard.mjs`, `skills/handoff/SKILL.md`, `skills/retro/SKILL.md`.
 - `hooks/guard.mjs` in the full layer differs from the light layers' copy in comment lines only: a code change to it goes into all three.
 
+## The Codex switch in `guard.mjs`
+
+`guard.mjs` is one file for two tools. Started as `node guard.mjs --harness codex` it reads OpenAI Codex's hook payloads - `Bash` whatever the shell, judged by PowerShell grammar on Windows and Bash grammar elsewhere, and `apply_patch` with the patch text - and refuses with JSON on stdout and exit 0, since a hook's exit code 2 does not block there. Under the switch it also takes the project root from its own location, protects the `.codex` layer files, fences agents by `agent_type` through `CODEX_FENCED_AGENTS`, and carries path-scoped rules itself (`.ai-layer/rules`, `ruleGate`, `--rules-for`). The Codex ports live in a repository of their own and receive this file as a copy.
+
+- **Every Codex branch tests `CODEX`.** Without the flag the file must not change one byte of output or one exit code: a change to a shared function is proved by running the committed guard and the edited one over every suite payload with no flag and comparing stdout, stderr and the exit code.
+- **A new check is written once, in Claude Code's words.** `codexWording` rewrites the refusal for the other tool (`CLAUDE.md` to `AGENTS.md`, "with Edit or Write" to "with apply_patch", the scratchpad to the temp directory); a new refusal keeps to those phrases, and the Codex block of each suite fails on one that does not.
+- **Each suite ends with a Codex block**, and the three copies of each suite stay byte-identical.
+
 ## The guard's known gaps
 
 The adopter-facing copy of the "refused though harmless" cases, and a summary of the "passes though it writes" ones, live in each layer's `template/.claude/hooks/README.md`, which does not point back here - a project never receives this file; a case that changes here changes there too. A bypass nobody would type by accident is recorded here, not closed with more guard code; a realistic slip, or a retry after a refusal, is a defect to fix in `guard.mjs`.
