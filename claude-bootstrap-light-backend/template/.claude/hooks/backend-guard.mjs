@@ -70,6 +70,8 @@ const FROZEN_PATHS = regexList('FROZEN_PATHS', FROZEN_RAW, FOLD ? 'i' : '');
 const EXAMPLE = String.raw`(?![^/]*\b(?:example|sample|template|dist|defaults?)\b)`;
 // A user's home folder by its absolute path or its shell spelling: a project's own .npmrc holds no token as a rule.
 const HOME = String.raw`(?:^|\/)(?:(?:Users|home)\/[^/]+|root|~|\$HOME|\$\{HOME\}|\$env:(?:USERPROFILE|HOME)|%USERPROFILE%)\/`;
+// The roaming AppData folder by its variable: cmd's, PowerShell's (also braced) and the one Git Bash exports.
+const APPDATA = String.raw`(?:%APPDATA%|\$env:APPDATA|\$\{env:APPDATA\}|\$APPDATA|\$\{APPDATA\})`;
 const SECRET_PATHS = [
   new RegExp(String.raw`(?:^|\/)\.env(?:[.\-_]${EXAMPLE}[^/]+)?$`, 'i'),
   new RegExp(String.raw`(?:^|\/)${EXAMPLE}[^/]+\.env$`, 'i'),
@@ -87,12 +89,12 @@ const SECRET_PATHS = [
   /(?:^|\/)\.m2\/settings(?:-security)?\.xml$/i,
   /(?:^|\/)\.gradle\/gradle\.properties$/i,
   new RegExp(String.raw`${HOME}\.(?:npmrc|yarnrc\.yml)$`, 'i'),
-  new RegExp(String.raw`(?:${HOME}(?:AppData\/Roaming\/NuGet|\.nuget\/NuGet|\.config\/NuGet)|(?:^|\/)(?:%APPDATA%|\$env:APPDATA)\/NuGet)\/NuGet\.Config$`, 'i'),
+  new RegExp(String.raw`(?:${HOME}(?:AppData\/Roaming\/NuGet|\.nuget\/NuGet|\.config\/NuGet)|(?:^|\/)${APPDATA}\/NuGet)\/NuGet\.Config$`, 'i'),
   // A kubeconfig by name, not a source file about one (kubeconfig.go, KubeconfigLoader.java).
   new RegExp(String.raw`(?:^|\/)${EXAMPLE}[^/]*kubeconfig(?:[-_][^/.]*)?(?:\.(?:ya?ml|json|conf|config|cfg))?$`, 'i'),
   /(?:^|\/)client_secret[^/]*\.json$/i,
   /(?:^|\/)application_default_credentials\.json$/i,
-  /(?:^|\/)(?:\.config|AppData\/Roaming)\/gcloud(?:\/|$)/i,
+  new RegExp(String.raw`(?:^|\/)(?:\.config|AppData\/Roaming|${APPDATA})\/gcloud(?:\/|$)`, 'i'),
   ...regexList('SECRET_PATHS', SECRET_RAW, 'i'),
 ];
 
@@ -119,7 +121,7 @@ const rule = (kind, label, source, scope = 'bare', hint = '') => ({
 // An image reference on this machine, and the end of a segment where only options follow it.
 const LOCAL_REGISTRY = String.raw`(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\/`;
 const LAST = String.raw`(?:\s+-\S+)*\s*$`;
-const SQL_CLIENTS = 'psql|mysql|mariadb|sqlcmd|sqlite3|clickhouse-client|cockroach|usql|pgcli|mycli|bq|snowsql';
+const SQL_CLIENTS = 'invoke-sqlcmd|psql|mysql|mariadb|sqlcmd|sqlite3|clickhouse-client|cockroach|usql|pgcli|mycli|bq|snowsql';
 const SQL_DROP = String.raw`\b(?:DROP\s+(?:DATABASE|SCHEMA|TABLE|COLUMN|INDEX|VIEW|ROLE|USER|OWNED)|TRUNCATE)\b`;
 const SQL_UNBOUNDED = String.raw`\b(?:DELETE\s+FROM|UPDATE\s+\S+(?:\s+(?:AS\s+)?\w+)?\s+SET)\b(?![^;]*\bWHERE\b)`;
 const SQL_CLIENT = new RegExp(tool(SQL_CLIENTS), 'i');
@@ -164,7 +166,8 @@ const FORBIDDEN = [
   rule('deploy', 'az acr build or run', tool('az') + first('acr') + first('build|run')),
   // A folder profile publishes on this machine; DeployOnBuild with one passes too.
   rule('deploy', 'a .NET publish profile', String.raw`^(?!.*\bPublishProfile=FolderProfile\b|.*\bWebPublishMethod=FileSystem\b)(?:.*` + tool('dotnet') + first('publish|msbuild|build') + '|.*' + tool('msbuild') + String.raw`)(?=.*\s(?:[-\/]p|(?:--?|\/)property):\S*?\b(?:PublishProfile=|WebPublishMethod=|DeployOnBuild=true\b))`),
-  rule('remote', 'ssh, scp, sftp or rsync to another host', (words) => Boolean(remoteHost(words)), 'words'),
+  rule('remote', 'ssh, scp, sftp, rsync or PuTTY to another host', (words) => Boolean(remoteHost(words)), 'words'),
+  rule('remote', 'winrs or psexec on another computer', windowsRemote, 'words'),
   // A tunnel to a database somewhere else - after a port-forward, `localhost` is that database - and a client the
   // command's own words point at another host.
   rule('remote', 'a tunnel to a cluster', String.raw`^(?!.*\s--context[= ](?:kind-[\w.-]+|k3d-[\w.-]+|minikube|docker-desktop|rancher-desktop|colima|orbstack)(?=\s|$)).*` + tool('kubectl|oc') + first('port-forward')),
@@ -325,8 +328,11 @@ function dockerRemote(words) {
 }
 
 // The other host an ssh, sftp, scp or rsync call reaches: ssh and sftp name it first, a copy as `host:path`.
-const REMOTE_TOOLS = new Set(['ssh', 'sftp', 'scp', 'rsync']);
+// PuTTY's plink and psftp name it first as ssh does, pscp as `host:path`; their options are whole words.
+const REMOTE_TOOLS = new Set(['ssh', 'sftp', 'scp', 'rsync', 'plink', 'psftp', 'pscp']);
 const REMOTE_VALUE = { ssh: 'BbcDEeFIiJLlmOoPpQRSWw', sftp: 'BbcDFiJloPRSsX', scp: 'cDFiJloPS', rsync: 'eTf' };
+const PUTTY = new Set(['plink', 'psftp', 'pscp']);
+const PUTTY_VALUE = /^-(?:P|l|i|pw|pwfile|m|L|R|D|load|hostkey|sercfg|proxycmd|b|sshlog|sshrawlog)$/;
 const LOCAL_HOST = /^\[?(?:localhost|127\.0\.0\.1|::1)\]?$/i;
 function hostOf(word, bare) {
   const scheme = /^(?:ssh|sftp|scp|rsync):\/\/(?:[^@\/]*@)?(\[[^\]]*\]|[^:\/]+)/i.exec(word);
@@ -344,13 +350,31 @@ function remoteHost(words) {
   for (let index = at + 1; index < words.length; index += 1) {
     const word = words[index];
     if (!word.startsWith('-')) plain.push(word);
-    else if (/^-[A-Za-z]+$/.test(word) && REMOTE_VALUE[name].includes(word.slice(-1))) index += 1;
+    else if (PUTTY.has(name) ? PUTTY_VALUE.test(word) : /^-[A-Za-z]+$/.test(word) && REMOTE_VALUE[name].includes(word.slice(-1))) index += 1;
     else if (name === 'rsync' && /^--(?:rsh|filter|exclude|include|files-from|exclude-from|include-from)$/.test(word)) index += 1;
   }
   // `ssh -T git@host` only checks that the git host accepts the key.
   if (name === 'ssh' && words.includes('-T') && plain.length === 1 && /^git@/i.test(plain[0])) return '';
-  const hosts = name === 'ssh' || name === 'sftp' ? plain.slice(0, 1).map((word) => hostOf(word, true)) : plain.map((word) => hostOf(word, false));
+  const hosts = /^(?:ssh|sftp|plink|psftp)$/.test(name) ? plain.slice(0, 1).map((word) => hostOf(word, true)) : plain.map((word) => hostOf(word, false));
   return hosts.find((host) => host && !LOCAL_HOST.test(host)) ?? '';
+}
+
+// This computer by any name a Windows remoting tool takes for it.
+const localComputer = (host) => /^(?:\.|localhost|127\.0\.0\.1|::1|\[::1\]|\$env:COMPUTERNAME|\$\{env:COMPUTERNAME\})$/i.test(host) || host.toLowerCase() === os.hostname().toLowerCase();
+const hostPart = (value) => value.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+
+// winrs runs on the computer its `-r:` / `-remote:` names (this one without it); psexec and paexec on each
+// `\\computer` they are handed.
+function windowsRemote(words) {
+  const names = words.map(commandName);
+  const at = names.findIndex((name) => /^(?:winrs|psexec(?:64)?|paexec)$/.test(name));
+  if (at === -1) return false;
+  const hosts = [];
+  for (const word of words.slice(at + 1)) {
+    const remote = names[at] === 'winrs' ? /^[-/]r(?:emote)?:(.+)$/i.exec(word) : /^\\\\(.+)$/.exec(word);
+    if (remote) hosts.push(...remote[1].split(',').filter(Boolean).map(hostPart));
+  }
+  return hosts.some((host) => !localComputer(host));
 }
 
 // A database client whose own words name another host: a host option or a connection URL. One run inside a
@@ -430,7 +454,8 @@ function remoteDatabase(words) {
   }
   // `-S` is sqlcmd's server; for mysql it is a socket, for psql a mode with no value.
   const sqlcmd = names[at] === 'sqlcmd';
-  const hostFlag = sqlcmd ? /^(?:-S|--server)$/ : names[at] === 'invoke-sqlcmd' ? /^-ServerInstance$/i : /^(?:-h|--host)$/;
+  // Invoke-Sqlcmd's -ServerInstance by the prefixes PowerShell accepts (`-Ser`).
+  const hostFlag = sqlcmd ? /^(?:-S|--server)$/ : names[at] === 'invoke-sqlcmd' ? /^-Ser(?:v(?:e(?:r(?:I(?:n(?:s(?:t(?:a(?:n(?:c(?:e)?)?)?)?)?)?)?)?)?)?)?$/i : /^(?:-h|--host)$/;
   const mongo = names[at] === 'mongosh' || names[at] === 'mongo';
   // Whether the client's own words say where it connects: only one that says nothing follows the call's variable.
   let named = false;
@@ -471,7 +496,7 @@ const WRAPPERS = new Set(['sudo', 'command', 'exec', 'nohup', 'time']);
 // here: loading an env file into a process prints nothing.
 const READERS = new Set([
   'cat', 'bat', 'batcat', 'less', 'more', 'most', 'head', 'tail', 'nl', 'tac', 'rev', 'paste', 'strings', 'xxd', 'od',
-  'hexdump', 'format-hex', 'base64', 'type', 'get-content', 'gc', 'import-csv', 'grep', 'egrep', 'fgrep', 'rg', 'ag',
+  'hexdump', 'format-hex', 'fhx', 'base64', 'type', 'get-content', 'gc', 'import-csv', 'grep', 'egrep', 'fgrep', 'rg', 'ag',
   'ack', 'findstr', 'select-string', 'sls', 'sed', 'gsed', 'awk', 'gawk', 'cut', 'sort', 'uniq', 'diff', 'cmp', 'jq',
   'yq', 'dd', 'tar', 'cp', 'copy', 'copy-item', 'cpi', 'scp', 'rsync', 'mv', 'move', 'move-item',
   // An archive, a recoding, a split or a Windows copier copies it.
@@ -482,13 +507,17 @@ const READERS = new Set([
 const readsByVerb = (name, words, at) =>
   (name === 'certutil' && words.some((word) => /^[-/](?:encode|decode|encodehex|dump)$/i.test(word))) || (name === 'openssl' && /^(?:base64|enc)$/.test(words[at + 1] ?? ''));
 // The upload tools read only the file they send - a value spelled `@file` or `<file`, the value of -T and its kin, a
-// `-Form` entry; a URL, a header or a client certificate (`--cert`, `--key`) is none.
-const UPLOADERS = new Set(['curl', 'wget', 'http', 'xh', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm']);
-const UPLOAD_FILE = /^(?:-T|--upload-file|--post-file|--body-file|-InFile)$/i;
+// `-Form` entry, a mail's `-Attachments`; a URL, a header or a client certificate (`--cert`, `--key`) is none.
+const UPLOADERS = new Set(['curl', 'wget', 'http', 'xh', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm', 'send-mailmessage']);
+// -InFile by the prefixes PowerShell accepts (`-InF` is also -InformationAction's); -Attachments by any, for
+// Send-MailMessage only (`-A` is curl's user agent).
+const UPLOAD_FILE = /^(?:-T|--upload-file|--post-file|--body-file|-InFi(?:l(?:e)?)?)$/i;
+const ATTACHMENTS = /^-A(?:t(?:t(?:a(?:c(?:h(?:m(?:e(?:n(?:t(?:s)?)?)?)?)?)?)?)?)?)?$/i;
 // Their first plain argument is a pattern or a script, never a path: `grep "\.env" src` searches for a string.
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls', 'sed', 'gsed', 'awk', 'gawk', 'jq', 'yq', 'perl', 'ruby']);
 // An option whose next word is a filter, a pattern or a name, never a path read: a wildcard after it is not expanded.
-const VALUE_OPTION = /^(?:-[gtvexdso]|--i?glob|--include|--exclude(?:-dir)?|--type|--regexp|--expression|--delimiter|--separator|--output|-i?name|-i?path|-i?wholename|-i?regex|-Filter|-Include|-Exclude|-Pattern)$/i;
+// find's -path is not here: find is no reader, and PowerShell's -Path is a path.
+const VALUE_OPTION = /^(?:-[gtvexdso]|--i?glob|--include|--exclude(?:-dir)?|--type|--regexp|--expression|--delimiter|--separator|--output|-i?name|-i?regex|-Filter|-Include|-Exclude|-Pattern)$/i;
 // Their last plain argument is where the copy lands, not what is read.
 const COPIERS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'scp', 'rsync', 'mv', 'move', 'move-item']);
 const GREPS = new Set(['grep', 'egrep', 'fgrep']);
@@ -509,7 +538,8 @@ const PS_LISTERS = new Set(['get-childitem', 'gci', 'dir', 'ls']);
 const PS_SEARCHERS = new Set(['select-string', 'sls']);
 const PS_RECURSE = /^-(?:r|re|rec|recu|recur|recurs|recurse|s)$/i;
 const FIND_RUNS = /^-(?:exec|execdir|ok|okdir)$/;
-const PATH_PARAM = /^-(?:Path|LiteralPath|LP|PSPath)$/i;
+// -Path, and -LiteralPath by the prefixes PowerShell accepts (`-Li` and `-Pa` are ambiguous in Select-String).
+const PATH_PARAM = /^-(?:Path|Lit(?:e(?:r(?:a(?:l(?:P(?:a(?:t(?:h)?)?)?)?)?)?)?)?|LP|PSPath)$/i;
 const EXPRESSION = /^(?:-e|--regexp|--expression)$/;
 const EXCLUDE_FLAG = /^--exclude(?:-dir)?$/i;
 const EXCLUDE_WORD = /^--exclude(?:-dir)?=/i;
@@ -654,16 +684,67 @@ function upstreamRef(dir) {
 // a migration committed on the working branch only is still the developer's to fix before the merge. With no
 // remote, every tracked one counts - the agent neither commits nor stages, so what git tracks the owner put there.
 // Any failure - no repo, a folder that does not exist - reads as "none", which allows the call.
+// Git is asked once per repository and call, never per path: the frozen files it tracks and which of them the upstream
+// branch holds are listed once, and every path is matched against that list here - a path as itself or as a folder
+// above the file, a wildcard as git's pathspec reads one (`*` crosses folders), in any case where the file system
+// folds it.
+const repoOfFolder = new Map();
+const frozenOfRepo = new Map();
+function frozenFiles(dir) {
+  if (!repoOfFolder.has(dir)) {
+    let found = null;
+    try {
+      // The folder's place in its repository as git spells it: a short 8.3 name or a link in the path cannot confuse it.
+      const [root, prefix] = git(dir, ['rev-parse', '--show-toplevel', '--show-prefix']).split('\n');
+      found = { root: root.trim(), prefix: prefix.trim() };
+    } catch {
+      // No repository there: nothing in it is frozen.
+    }
+    repoOfFolder.set(dir, found);
+  }
+  const place = repoOfFolder.get(dir);
+  if (!place) return null;
+  const root = place.root;
+  if (!frozenOfRepo.has(root)) {
+    let names = [];
+    try {
+      const tracked = execFileSync('git', ['-C', root, 'ls-files', '-z', '--full-name'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000, maxBuffer: 256 * 1024 * 1024 })
+        .split('\0')
+        .filter((name) => name && isFrozenPath(`/${name}`));
+      const ref = tracked.length ? upstreamRef(root) : '';
+      if (!ref) names = tracked;
+      else {
+        const found = git(root, ['cat-file', '--batch-check'], tracked.map((name) => `${ref}:${name}\n`).join('')).split('\n');
+        names = tracked.filter((_, index) => found[index] && !found[index].endsWith(' missing'));
+      }
+    } catch {
+      names = [];
+    }
+    frozenOfRepo.set(root, names.map((name) => (FOLD ? name.toLowerCase() : name)));
+  }
+  return { prefix: place.prefix, names: frozenOfRepo.get(root) };
+}
 function frozenAt(target, cwd) {
   const file = absolute(plainSpelling(target), cwd);
-  const dir = path.dirname(file);
+  const listed = frozenFiles(path.dirname(file));
+  if (!listed || !listed.names.length) return false;
+  const name = path.basename(file);
+  const relative = (FOLD ? (listed.prefix + name).toLowerCase() : listed.prefix + name).replace(/\/+$/, '');
+  if (WILD.test(name)) {
+    const matches = globMatcher(relative, FOLD);
+    return listed.names.some((tracked) => matches(tracked));
+  }
+  return listed.names.some((tracked) => tracked === relative || tracked.startsWith(`${relative}/`));
+}
+
+// Whether a removed path can reach a frozen file at all, before git is asked (one call per word is slow): it matches
+// the list itself, it is a wildcard, or it is a folder that may hold one. A plain file the list does not name never is.
+function mayHoldFrozen(target, cwd) {
+  if (WILD.test(target)) return true;
+  const file = absolute(plainSpelling(target), cwd);
+  if (isFrozenPath(file)) return true;
   try {
-    const tracked = git(dir, ['ls-files', '-z', '--full-name', '--', `${FOLD ? ':(icase)' : ''}${normalized(file)}`]).split('\0').filter((name) => name && isFrozenPath(`/${name}`));
-    if (!tracked.length) return false;
-    const ref = upstreamRef(dir);
-    if (!ref) return true;
-    const found = git(dir, ['cat-file', '--batch-check'], tracked.map((name) => `${ref}:${name}\n`).join(''));
-    return found.split('\n').some((line) => line && !line.endsWith(' missing'));
+    return statSync(file).isDirectory();
   } catch {
     return false;
   }
@@ -730,15 +811,29 @@ function withoutHeredocs(command) {
 // `'@` or `"@` at the start of a later line (no blank may come before it). Each becomes one single-quoted word, so an
 // apostrophe or a quote inside no longer unbalances the rest of the command; what it is piped into is judged below.
 // A `@"` body's `$(...)` runs, so it is checked as a command first. An opener with no closer changes nothing.
+// A block comment `<# ... #>` is blank space to PowerShell, so it leaves one blank here: what follows it is judged. It
+// opens only where a token may start (after a blank, an operator, a comma, a `-Name:`, a closing quote or another
+// comment; `a<#b#>` is one word), and `<#>` closes nothing.
 function hereStringsQuoted(command, cwd, depth) {
   let out = '';
   let quote = '';
   let comment = '';
+  let opened = 0;
+  // Where the last block comment closed: another may open right after it (`<# a #><# b #>`).
+  let closed = -2;
   for (let index = 0; index < command.length; index += 1) {
     const ch = command[index];
+    if (comment === '<#') {
+      if (ch === '>' && command[index - 1] === '#' && index > opened + 2) {
+        comment = '';
+        closed = index;
+        out += ' ';
+      }
+      continue;
+    }
     if (comment) {
       out += ch;
-      if (comment === '#' ? ch === '\n' : ch === '>' && command[index - 1] === '#') comment = '';
+      if (ch === '\n') comment = '';
       continue;
     }
     if (quote) {
@@ -769,8 +864,11 @@ function hereStringsQuoted(command, cwd, depth) {
       }
     }
     if (ch === '#' && (index === 0 || /[\s;|&(){}]/.test(command[index - 1]))) comment = '#';
-    else if (ch === '<' && mark === '#') comment = '<#';
-    else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '<' && mark === '#' && (index === 0 || index === closed + 1 || /[\s;|&(){},'"]/.test(command[index - 1]) || /(?:^|[\s,])-[A-Za-z][\w-]*:$/.test(command.slice(Math.max(0, index - 64), index)))) {
+      comment = '<#';
+      opened = index;
+      continue;
+    } else if (ch === "'" || ch === '"') quote = ch;
     out += ch;
   }
   return out;
@@ -855,14 +953,15 @@ function segmentsOf(command, shell) {
     word = '';
     started = false;
   };
-  // What stood between two segments; a single `|` makes the second one read the first one's output (`piped`).
+  // What stood between two segments; a single `|` makes the second one read the first one's output (`piped`), and so
+  // does `|&` (Bash's pipe of both streams, PowerShell's pipe into a script block `| & { ... }`).
   let joint = '';
   // Whether the segment reads a `<` redirect or a heredoc: then nothing is typed into what it runs.
   let stdin = false;
   const endSegment = (by = '') => {
     endWord();
     if (words.length) {
-      words.piped = /^\)?\|$/.test(joint.replace(/\s/g, ''));
+      words.piped = /^\)?\|&?$/.test(joint.replace(/\s/g, ''));
       words.redirected = redirected;
       words.stdin = stdin;
       segments.push(words);
@@ -897,7 +996,8 @@ function segmentsOf(command, shell) {
     } else if (ch === '#' && !started) {
       while (index + 1 < command.length && command[index + 1] !== '\n') index += 1;
     } else if (ch === '\n' || ';&|()'.includes(ch)) endSegment(ch);
-    else if (ch === '<' || ch === '>') {
+    // In PowerShell a `<` inside a word is part of it (`a<#b#>` is one word), never a redirect.
+    else if ((ch === '<' && !(shell === 'PowerShell' && started)) || ch === '>') {
       if (ch === '>' && /^(?:\d+|\*)$/.test(word)) {
         word = '';
         started = false;
@@ -1318,7 +1418,7 @@ function fedWalks(words, names, at, feed, psTakes, xargsTakes, shell) {
 // `Compress-Archive -Path config ...`, `Copy-Item -Recurse config x`, `cp -r . /tmp/bk`, `robocopy . x /E`. Each folder it
 // is handed is walked, past what its own exclusions leave out (`--exclude`, zip's `-x`, robocopy's `/XF`); the archive
 // file and the destination are not sources.
-function checkFolderCopy(words, names, reader, destination, cwd) {
+function checkFolderCopy(words, names, reader, destination, cwd, shell) {
   const name = names[reader];
   if (!/^(?:cp|copy|copy-item|cpi|rsync|zip|tar|7z|7za|compress-archive|robocopy|xcopy)$/.test(name)) return;
   const rest = words.slice(reader + 1);
@@ -1347,8 +1447,9 @@ function checkFolderCopy(words, names, reader, destination, cwd) {
   if (/^(?:zip|7z|7za)$/.test(name)) plain.shift();
   // robocopy names its source, its destination, then file names.
   if (name === 'robocopy') plain.splice(1);
-  for (const index of plain) {
-    const folder = absolute(homeExpanded(words[index]), cwd);
+  // PowerShell hands a comma list over as several sources: `Compress-Archive -Path app,. x.zip`.
+  for (const source of plain.flatMap((index) => (shell === 'PowerShell' ? words[index].split(',').filter(Boolean) : [words[index]]))) {
+    const folder = absolute(homeExpanded(source), cwd);
     try {
       if (!statSync(folder).isDirectory()) continue;
     } catch {
@@ -1356,14 +1457,15 @@ function checkFolderCopy(words, names, reader, destination, cwd) {
     }
     const depth = name === 'robocopy' && !rest.some((word) => /^\/[se]$/i.test(word)) ? 0 : Infinity;
     const secret = secretUnder(folder, { ...noFilters(), exclude, depth });
-    if (secret === TOO_LARGE) ask(normalized(words[index]), 'large');
-    else if (secret) secretRefusal(`${words[index]} (${normalized(path.relative(cwd, secret))})`, 'print or copy');
+    if (secret === TOO_LARGE) ask(normalized(source), 'large');
+    else if (secret) secretRefusal(`${source} (${normalized(path.relative(cwd, secret))})`, 'print or copy');
   }
 }
 
 // A wildcard the shell expands before the command runs reaches the secret files it names on disk: `cat .e*`,
-// `gc config/*`. Its folder is listed once; under Bash a wildcard opening the name does not take a dot file.
-function globSecret(word, cwd, shell) {
+// `gc config/*`. Its folder is listed once; under Bash a wildcard opening the name does not take a dot file. `keep`:
+// whether the command's own filters let a name through (`Remove-Item app/* -Exclude .env.local`).
+function globSecret(word, cwd, shell, keep = () => true) {
   const spot = folderAndName(homeExpanded(word));
   if (!spot || !WILD.test(spot.name)) return '';
   let entries;
@@ -1376,7 +1478,7 @@ function globSecret(word, cwd, shell) {
   for (const entry of entries.slice(0, WALK_CAP)) {
     if (shell !== 'PowerShell' && entry.startsWith('.') && !spot.name.startsWith('.')) continue;
     const full = path.join(absolute(spot.folder, cwd), entry);
-    if (isSecret(full) && matches(entry)) return full;
+    if (isSecret(full) && matches(entry) && keep(entry)) return full;
   }
   return '';
 }
@@ -1472,15 +1574,20 @@ function removedSources(words, names) {
   return list.some((word) => /^-(?:Destination|Dest|NewName)$/i.test(word)) ? sources : sources.filter((_, index) => index !== plain.at(-1));
 }
 
-// The words a block or a keyword wraps around a command - `{ rm x; }`, `1 | % { ... }`, `if (...) { ... }`, `then psql`
-// - are dropped before a segment is judged, so the command inside is judged as if it were typed alone.
-const BLOCK_WORD = /^(?:\{|\}|\.|%|foreach-object|invoke-command|icm|if|then|else|elif|do|while|until|try|finally)$/i;
-function unwrapped(words) {
+// The words a block or a keyword wraps around a command - `{ rm x; }`, `1 | % { ... }`, `if (...) { ... }`, `then psql`,
+// a script block's `process { ... }` - are dropped before a segment is judged, so the command inside is judged as if it
+// were typed alone. A brace may be glued to what calls it: `%{ ... }`, `.{ ... }`.
+const BLOCK_WORD = /^(?:\{|\}|\.|%|%\{|\.\{|foreach-object|foreach|invoke-command|icm|if|then|else|elif|do|while|until|try|finally|begin|process|end)$/i;
+const OPENS = /^(?:%|\.)?\{/;
+// A block run once per piped item: the command inside reads no pipe of its own.
+const PER_ITEM = /^(?:%|foreach-object|foreach)(?:\{|$)/i;
+// A PowerShell script block never reads the pipe as stdin (`1 | & { psql }`); a Bash group does (`x | { xargs rm; }`).
+function unwrapped(words, shell) {
   let start = 0;
   let end = words.length;
   while (start < end && BLOCK_WORD.test(words[start])) start += 1;
   while (end > start && words[end - 1] === '}') end -= 1;
-  const opened = words.slice(0, start).includes('{') || /^\{./.test(words[start] ?? '');
+  const opened = words.slice(0, start).some((word) => OPENS.test(word)) || /^(?:%|\.)?\{./.test(words[start] ?? '');
   if (start === 0 && end === words.length && !opened) return words;
   const kept = [];
   kept.redirected = new Set();
@@ -1488,12 +1595,104 @@ function unwrapped(words) {
     if (words.redirected?.has(index)) kept.redirected.add(kept.length);
     kept.push(words[index]);
   }
-  if (/^\{./.test(kept[0] ?? '')) kept[0] = kept[0].slice(1);
+  if (/^(?:%|\.)?\{./.test(kept[0] ?? '')) kept[0] = kept[0].replace(OPENS, '');
   // A brace glued to the last word closes the block it opened: `% { gc .env}`.
   if (opened && /[^{]\}$/.test(kept.at(-1) ?? '')) kept[kept.length - 1] = kept.at(-1).slice(0, -1);
-  kept.piped = words.piped;
+  kept.piped = words.piped && !words.slice(0, start + 1).some((word) => PER_ITEM.test(word) || (shell === 'PowerShell' && OPENS.test(word)));
   kept.stdin = words.stdin;
   return kept;
+}
+
+// A PowerShell command that runs the script blocks it is handed - ForEach-Object (`-Begin`, `-Process`, `-End`, or two
+// or three blocks in a row), Where-Object, Invoke-Command, Measure-Command, Start-Job, a dot-sourced block - has each
+// of its top-level blocks judged as a command of its own, fed what the segment is fed; the words around them are one
+// more. None of them reads the pipe as its stdin.
+const BLOCK_RUNNER = /^(?:%|foreach-object|foreach|\?|where|where-object|invoke-command|icm|measure-command|start-job|sajb|start-threadjob|\.)$/;
+const BLOCK_PARAM = /^-(?:B(?:e(?:g(?:i(?:n)?)?)?)?|Pr(?:o(?:c(?:e(?:s(?:s)?)?)?)?)?|En(?:d)?|R(?:e(?:m(?:a(?:i(?:n(?:i(?:n(?:g(?:S(?:c(?:r(?:i(?:p(?:t(?:s)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?|Sc(?:r(?:i(?:p(?:t(?:B(?:l(?:o(?:c(?:k)?)?)?)?)?)?)?)?)?)$/i;
+const braces = (word, ch) => word.split(ch).length - 1;
+function blockGroups(words) {
+  const glued = OPENS.test(words[0] ?? '') && !/^\{/.test(words[0]);
+  if (!glued && !BLOCK_RUNNER.test(commandName(words[0] ?? ''))) return null;
+  const outer = glued ? [] : [words[0]];
+  const groups = [];
+  let group = null;
+  let depth = 0;
+  for (let index = glued ? 0 : 1; index < words.length; index += 1) {
+    let word = words[index];
+    if (depth === 0) {
+      if (!OPENS.test(word)) {
+        if (!BLOCK_PARAM.test(word)) outer.push(word);
+        continue;
+      }
+      group = [];
+      depth = braces(word, '{') - braces(word, '}');
+      word = word.replace(OPENS, '');
+    } else depth += braces(word, '{') - braces(word, '}');
+    if (depth <= 0) word = word.replace(/\}$/, '');
+    if (word) group.push(word);
+    if (depth <= 0) {
+      groups.push(group);
+      group = null;
+      depth = 0;
+    }
+  }
+  if (group) groups.push(group);
+  if (!groups.length) return null;
+  return [outer, ...groups].map((list, index) => {
+    list.redirected = new Set();
+    list.piped = index === 0 && words.piped;
+    list.stdin = index === 0 && words.stdin;
+    return list;
+  });
+}
+
+// PowerShell joins a parameter to its value with a colon (`-Path:.env`, `-InFile:.env`, `-Recurse:$true`) or a colon
+// and a blank (`-Path: .env`). In a segment that runs a cmdlet or one of its aliases each such word is read as the
+// parameter and its value, so every check sees `-Path .env`; a switch set to `$true` is the switch, one set to
+// `$false` is dropped. A one-letter option and msbuild's `-property:` belong to a native tool and stay whole
+// (`-p:PublishProfile=x`).
+const PS_ALIASES = new Set(['gc', 'cat', 'type', 'gi', 'gci', 'dir', 'ls', 'rm', 'del', 'erase', 'ri', 'rd', 'rmdir', 'mi', 'mv', 'move', 'cpi', 'cp', 'copy', 'rni', 'ren', 'clc', 'sls', 'fhx', 'iwr', 'irm', 'curl', 'wget', 'icm', 'etsn', 'nsn', 'saps', 'start', 'iex', '%']);
+// PowerShell needs no blank around a block's braces: `&{process{gc $_}}`, `%{begin{}process{x}}`. A word that opens
+// with braces or a block keyword glued to one (`{process{gc`), and a word that ends in closing braces and opens none
+// (`$_}}`), is split into its braces, its keywords and the rest; a hash table (`@{a=1}`) and `${env:x}` stay whole.
+const GLUED_OPEN = /^(?:[{}]|(?:begin|process|end|%|\.)(?=\{))/i;
+function bracesSplit(words, shell) {
+  if (shell !== 'PowerShell' || !words.some((word) => GLUED_OPEN.test(word) || /[^{}]\}+$/.test(word))) return words;
+  const out = [];
+  out.redirected = new Set();
+  words.forEach((word, index) => {
+    if (words.redirected?.has(index)) out.redirected.add(out.length);
+    let rest = word;
+    const parts = [];
+    for (let head = GLUED_OPEN.exec(rest); head && rest.length > 1; head = GLUED_OPEN.exec(rest)) {
+      parts.push(head[0]);
+      rest = rest.slice(head[0].length);
+    }
+    const tail = rest.includes('{') ? null : /^(.*?)(\}+)$/.exec(rest);
+    if (tail && tail[1]) parts.push(tail[1], ...tail[2].split(''));
+    else if (rest) parts.push(rest);
+    out.push(...parts);
+  });
+  out.piped = words.piped;
+  out.stdin = words.stdin;
+  return out;
+}
+
+const isCmdlet = (name) => /^[a-z]+-[a-z]+$/.test(name) || PS_ALIASES.has(name);
+function colonValues(words, shell) {
+  if (shell !== 'PowerShell' || !words.some((word) => isCmdlet(commandName(word.replace(OPENS, ''))))) return words;
+  const out = [];
+  out.redirected = new Set();
+  words.forEach((word, index) => {
+    if (words.redirected?.has(index)) out.redirected.add(out.length);
+    const joined = /^(-[A-Za-z][\w-]+):(.*)$/.exec(word);
+    if (!joined || /^-property$/i.test(joined[1])) out.push(word);
+    else if (/^\$false$/i.test(joined[2])) return;
+    else out.push(...(joined[2] === '' || /^\$true$/i.test(joined[2]) ? [joined[1]] : [joined[1], joined[2]]));
+  });
+  out.piped = words.piped;
+  out.stdin = words.stdin;
+  return out;
 }
 
 // PowerShell's -ArgumentList by any prefix it accepts, and its alias.
@@ -1501,9 +1700,20 @@ const ARG_LIST = /^-(?:args|a(?:r(?:g(?:u(?:m(?:e(?:n(?:t(?:l(?:i(?:s(?:t)?)?)?)
 const ENCODED = /^-(?:ec|e(?:n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?)$/i;
 
 function checkSegment(segment, shell, cwd, depth, feed) {
-  const words = unwrapped(segment);
+  if (shell === 'PowerShell') {
+    // Remoting is judged on the segment as typed: unwrapping drops Invoke-Command, and a block holds its own calls.
+    if (psRemote(segment)) ask('PowerShell remoting to another computer', 'remote');
+    const blocks = blockGroups(segment);
+    if (blocks) {
+      for (const block of blocks) checkSegment(block, shell, cwd, depth, feed);
+      return;
+    }
+  }
+  const words = unwrapped(segment, shell);
   if (words.length === 0) return;
   const names = words.map(commandName);
+  // PowerShell reads `a,b` as two arguments; Bash as one name.
+  const pieces = (word) => (shell === 'PowerShell' ? word.split(',').filter(Boolean) : [word]);
   const headAt = names.findIndex((name, index) => !/^[A-Za-z_]\w*=/.test(words[index]) && !WRAPPERS.has(name));
   const head = names[headAt] ?? '';
   const text = words.join(' ');
@@ -1578,26 +1788,41 @@ function checkSegment(segment, shell, cwd, depth, feed) {
         return;
       }
       for (const value of values) if (value && !value.startsWith('!') && reachesFrom(value, cwd)) secretRefusal(value, 'print or copy');
-      if (!flag && index > reader && reader === commandIndex && WILD.test(word) && !VALUE_OPTION.test(before)) wild.push(word);
+      if (!flag && index > reader && reader === commandIndex && WILD.test(word) && !VALUE_OPTION.test(before)) wild.push(...pieces(word).filter((piece) => WILD.test(piece)));
     });
     checkSearch(words, names, reader, cwd, feed, shell);
     for (const word of wild) {
       const secret = globSecret(word, cwd, shell);
       if (secret) secretRefusal(`${word} (${normalized(path.relative(cwd, secret))})`, 'print or copy');
     }
-    if (reader === commandIndex) checkFolderCopy(words, names, reader, destination, cwd);
+    if (reader === commandIndex) checkFolderCopy(words, names, reader, destination, cwd, shell);
   }
 
   const uploader = names.findIndex((name) => UPLOADERS.has(name));
   if (uploader !== -1) {
     const form = words.findIndex((word) => /^-Form$/i.test(word));
+    // A mail's attachments: the list after -Attachments, over several words when one ends in a comma (`a.txt, .env`),
+    // and the files piped into it (`Get-Item .env | Send-MailMessage ...`).
+    const attached = new Set();
+    if (names[uploader] === 'send-mailmessage') {
+      words.forEach((word, index) => {
+        if (ATTACHMENTS.test(words[index - 1] ?? '') || (attached.has(index - 1) && words[index - 1].endsWith(','))) attached.add(index);
+      });
+      for (const { folder, filters } of fedWalks(words, names, uploader, feed, new Set(['send-mailmessage']), new Set(), shell)) {
+        if (reaches(folder)) secretRefusal(folder, 'upload');
+        const secret = secretUnder(absolute(homeExpanded(folder), cwd), filters);
+        if (secret === TOO_LARGE) ask(folder, 'large');
+        else if (secret) secretRefusal(normalized(path.relative(cwd, secret)), 'upload');
+      }
+    }
     words.forEach((word, index) => {
       if (index <= uploader) return;
       const pieces = [...word.matchAll(/[@<]([^;,{}\s]+)/g)].map((match) => match[1]);
       const joined = /^--(?:upload-file|post-file|body-file)=(.+)$/i.exec(word);
       if (joined) pieces.push(joined[1]);
       if (UPLOAD_FILE.test(words[index - 1] ?? '') || (form !== -1 && index > form)) pieces.push(word.replace(/^@?\{?(?:[\w-]+=)?/, '').replace(/[})]+$/, ''));
-      for (const piece of pieces) if (piece && reachesFrom(piece, cwd)) secretRefusal(piece, 'upload');
+      if (attached.has(index)) pieces.push(...word.split(','));
+      for (const piece of pieces) if (piece && (reachesFrom(piece, cwd) || globSecret(piece, cwd, shell))) secretRefusal(piece, 'upload');
     });
   }
 
@@ -1610,20 +1835,25 @@ function checkSegment(segment, shell, cwd, depth, feed) {
   }
 
   if (FROZEN_PATHS.length) {
-    for (const word of removed(words, names)) {
-      if (!word.startsWith('-') && frozenAt(word, cwd)) frozenRefusal(word, 'delete or move');
+    for (const word of removed(words, names).flatMap(pieces)) {
+      if (!word.startsWith('-') && mayHoldFrozen(word, cwd) && frozenAt(word, cwd)) frozenRefusal(word, 'delete or move');
     }
   }
   // A database's own data folder, wherever it is: guard.mjs refuses a recursive delete inside the project only.
   // `git rm --cached` only stops tracking it.
   if (!(head === 'git' && words.includes('--cached'))) {
-    for (const word of removed(words, names)) {
+    for (const word of removed(words, names).flatMap(pieces)) {
       if (!word.startsWith('-') && (DATA_DIR.test(normalized(word)) || DATA_ROOT.test(normalized(word)))) ask('a database data folder', 'data');
     }
     // A secret file deleted or moved away holds values only the owner has: by name or by a wildcard on disk, behind
-    // a deleting `find`, or handed over a pipe (`gi .env | Remove-Item`, `echo .env | xargs rm`).
-    for (const word of removedSources(words, names)) {
-      if (!word.startsWith('-') && (reachesFrom(word, cwd) || globSecret(word, cwd, shell))) secretDeleteRefusal(word);
+    // a deleting `find`, or handed over a pipe (`gi .env | Remove-Item`, `echo .env | xargs rm`). A PowerShell
+    // remover's -Include, -Filter and -Exclude decide which names its wildcard takes.
+    const filterValues = (flag) => words.flatMap((word, index) => (flag.test(words[index - 1] ?? '') ? pieces(word).map((glob) => globTest(glob, 'i')) : []));
+    const include = shell === 'PowerShell' ? filterValues(/^-(?:Include|Filter)$/i) : [];
+    const exclude = shell === 'PowerShell' ? filterValues(/^-Exclude$/i) : [];
+    const keep = (name) => (!include.length || include.some((test) => test(name))) && !exclude.some((test) => test(name));
+    for (const word of removedSources(words, names).flatMap(pieces)) {
+      if (!word.startsWith('-') && (reachesFrom(word, cwd) || globSecret(word, cwd, shell, keep))) secretDeleteRefusal(word);
     }
     const deletingFind = names[commandIndex] === 'find' && (words.includes('-delete') || words.some((word, index) => FIND_RUNS.test(word) && REMOVERS.has(names[index + 1])));
     const walks = deletingFind ? findWalks(words, commandIndex) : fedWalks(words, names, commandIndex, feed, PS_FED_REMOVERS, REMOVERS, shell);
@@ -1645,13 +1875,32 @@ function checkSegment(segment, shell, cwd, depth, feed) {
     }
   }
 
-  // `pwsh -EncodedCommand <base64>` runs the decoded text.
+  // `pwsh -EncodedCommand <base64>` runs the decoded text - also glued (`-ec:<base64>`) and inside Start-Process's
+  // argument list. Only pwsh's own option counts: after the pwsh word and before its -File or -Command, which hand
+  // every later word to the script (`docker run -e X=1 img pwsh -File t.ps1 -e dev`). Under Codex a value the hook
+  // cannot decode (a variable, a subexpression) is refused: it is unread.
   if (names.some((name) => name === 'pwsh' || name === 'powershell')) {
-    words.forEach((word, index) => {
-      if (!ENCODED.test(words[index - 1] ?? '') || !/^[A-Za-z0-9+/]{4,}={0,2}$/.test(word)) return;
-      if (depth < MAX_DEPTH) checkCommand(Buffer.from(word, 'base64').toString('utf16le'), 'PowerShell', cwd, depth + 1);
-      else tooDeep();
+    const spread = bareWords.flatMap((word) => word.split(/\s+/)).flatMap((word) => {
+      const glued = /^(-\w+):(.+)$/.exec(word);
+      return glued && ENCODED.test(glued[1]) ? [glued[1], glued[2]] : [word];
     });
+    const undecodable = () =>
+      deny(`Blocked by .claude/hooks/backend-guard.mjs: this command hands PowerShell an encoded command this guard cannot decode, so it cannot be judged. ${RULE}: run the decoded command itself, so that it is judged.`);
+    let own = false;
+    for (let index = 0; index < spread.length; index += 1) {
+      const word = spread[index];
+      if (/^(?:pwsh|powershell)$/.test(commandName(word))) own = true;
+      else if (own && /^-(?:f|fi|fil|file|c|co|com|comm|comma|comman|command)$/i.test(word)) own = false;
+      else if (own && ENCODED.test(word)) {
+        const value = spread[index + 1] ?? '';
+        if (!/^[A-Za-z0-9+/]{4,}={0,2}$/.test(value)) {
+          if (CODEX) undecodable();
+        } else if (depth < MAX_DEPTH) checkCommand(Buffer.from(value, 'base64').toString('utf16le'), 'PowerShell', cwd, depth + 1);
+        else tooDeep();
+        index += 1;
+        own = false;
+      }
+    }
   }
 
   if (names.some((name) => LAUNCHERS.has(name))) {
@@ -1671,6 +1920,71 @@ function checkSegment(segment, shell, cwd, depth, feed) {
   }
 }
 
+// PowerShell remoting runs on the computer it names. Every call in the segment is read, inside a block too
+// (`% { icm $_ { ... } }`, `Measure-Command { Enter-PSSession x }`), each by its own words past the blocks it is handed:
+//   - any cmdlet's -ComputerName (from -Comp, and its aliases -Cn, -Server, -__Server) and -CimSession;
+//   - on Invoke-Command, Enter-PSSession and New-PSSession also -HostName (from -Ho), -ConnectionUri (-URI, -CU), and
+//     the first plain word that is no option's value, before or after the script block - as on Restart-Computer and
+//     Stop-Computer, which with the three take -IPAddress too (elsewhere it is a network setting's own address);
+//   - a session handed over (-Session on those three, -SSHConnection, -ToSession, -FromSession): its computer is not
+//     in the text.
+// A host list may run over several words (`-ComputerName a, b`). A network probe's -ComputerName is not remoting
+// (`Test-Connection`, the ping equivalent), and a host the hook cannot tell is this machine (`$h`, `$_`) is another.
+const PS_REMOTING = /^(?:invoke-command|icm|enter-pssession|etsn|new-pssession|nsn)$/;
+const PS_POSITIONAL_HOST = /^(?:invoke-command|icm|enter-pssession|etsn|new-pssession|nsn|restart-computer|stop-computer)$/;
+const PS_PROBES = /^(?:test-connection|test-netconnection|tnc|resolve-dnsname)$/;
+const PS_HOST = /^-(?:Comp(?:u(?:t(?:e(?:r(?:N(?:a(?:m(?:e)?)?)?)?)?)?)?)?|Cn|Server|__Server|CimSession)$/i;
+const PS_REMOTING_HOST = /^-(?:Ho(?:s(?:t(?:N(?:a(?:m(?:e)?)?)?)?)?)?|URI|CU|ConnectionU(?:r(?:i)?)?)$/i;
+const PS_SESSION = /^-(?:SSHConnection|ToS(?:e(?:s(?:s(?:i(?:o(?:n)?)?)?)?)?)?|FromS(?:e(?:s(?:s(?:i(?:o(?:n)?)?)?)?)?)?)$/i;
+// The remoting cmdlets' switches: the word after one may be the computer.
+const PS_REMOTING_SWITCH = /^-(?:UseSSL|EnableNetworkAccess|AllowRedirection|HideComputerName|AsJob|InDisconnectedSession|NoNewScope|RunAsAdministrator|Force|Wait)$/i;
+function psRemote(words) {
+  const depthOf = [];
+  let level = 0;
+  for (const word of words) {
+    depthOf.push(level);
+    level += braces(word, '{') - braces(word, '}');
+  }
+  return words.some((call, at) => {
+    const name = commandName(call.replace(OPENS, ''));
+    if (!(PS_POSITIONAL_HOST.test(name) || isCmdlet(name)) || PS_PROBES.test(name)) return false;
+    const remoting = PS_REMOTING.test(name);
+    // Its own words, one `{}` standing for each block it is handed.
+    const callDepth = depthOf[at] + (OPENS.test(call) ? 1 : 0);
+    const own = [];
+    // They end where the next call at its own depth starts: a segment of thousands of calls is read once, not once per
+    // call.
+    for (let index = at + 1; index < words.length && depthOf[index] >= callDepth; index += 1) {
+      if (depthOf[index] > callDepth) continue;
+      const next = commandName(words[index]);
+      if (PS_POSITIONAL_HOST.test(next) || /^[a-z]+-[a-z]+$/.test(next)) break;
+      if (OPENS.test(words[index])) own.push('{}');
+      else if (words[index].replace(/[{}]/g, '')) own.push(words[index].replace(/[{}]/g, ''));
+    }
+    // Copy-Item takes -ToSession and -FromSession by their shortest prefixes too (`-To`, `-Fr`).
+    const copy = /^(?:copy-item|cpi|copy|cp)$/.test(name);
+    if (own.some((word) => PS_SESSION.test(word) || (remoting && /^-Session$/i.test(word)) || (copy && /^-(?:To|Fr|Fro|From)$/i.test(word)))) return true;
+    const hosts = [];
+    const take = (from) => {
+      for (let index = from; index < own.length && own[index] !== '{}'; index += 1) {
+        hosts.push(...own[index].split(',').filter(Boolean));
+        if (!own[index].endsWith(',')) break;
+      }
+    };
+    own.forEach((word, index) => {
+      const named = PS_HOST.test(word) || (remoting && PS_REMOTING_HOST.test(word)) || (PS_POSITIONAL_HOST.test(name) && /^-IPAddress$/i.test(word));
+      if (named && own[index + 1] && !own[index + 1].startsWith('-')) take(index + 1);
+    });
+    if (!hosts.length && PS_POSITIONAL_HOST.test(name)) {
+      const positional = own.flatMap((word, index) => (word !== '{}' && !word.startsWith('-') && !(/^-/.test(own[index - 1] ?? '') && !PS_REMOTING_SWITCH.test(own[index - 1])) ? [index] : []));
+      // Invoke-Command's one plain word with no block beside it is the script block (`Invoke-Command $sb`).
+      const blockGiven = own.includes('{}') || own.some((word) => /^-(?:Sc\w*|FilePath|File|FP)$/i.test(word));
+      if (positional.length && !(/^(?:invoke-command|icm)$/.test(name) && positional.length === 1 && !blockGiven)) take(positional[0]);
+    }
+    return hosts.some((host) => !localComputer(hostPart(host)));
+  });
+}
+
 // ---- Under the Codex switch only: an interactive database session or console. What is typed into a running
 // command fires no hook there, so a client left open is a database shell nothing checks. ----
 const SESSION_CLIENTS = new Set([
@@ -1678,11 +1992,15 @@ const SESSION_CLIENTS = new Set([
   'mongosh', 'mongo', 'redis-cli', 'valkey-cli', 'sqlplus', 'cqlsh',
 ]);
 const CONTAINER_SHELLS = new Set(['bash', 'sh', 'ash', 'zsh', 'dash', 'ksh', 'fish', 'pwsh', 'powershell']);
+// An interpreter in a container, whose prompt waits for typed input when nothing hands it a script or code; and the
+// options of python's that take a value (`-X dev`, `-W ignore`).
+const REPLS = /^(?:node|nodejs|python[\d.]*|ipython3?|ruby|irb|php|bun|deno)$/;
+const REPL_VALUE = /^-[XWQ]$/;
 // `django` is the module `python -m django` runs.
 const CONSOLES = new Set(['manage.py', 'django-admin', 'django', 'artisan', 'rails', 'flask']);
 // What may stand before a client in command position: a shell or a launcher with its switches, a package runner, an
 // interpreter that runs a console's script (`python manage.py shell`, `py -3 -m django shell`, `bundle exec rails c`).
-const LAUNCH_NAME = /^(?:cmd|pwsh|powershell|bash|sh|zsh|dash|ksh|wsl|winpty|start-process|saps|start|invoke-command|icm|python[\d.]*|py|php|ruby|uv|poetry|pipenv|pdm|hatch|rye|bundle|run|exec)$/;
+const LAUNCH_NAME = /^(?:iex|invoke-expression|cmd|pwsh|powershell|bash|sh|zsh|dash|ksh|wsl|winpty|start-process|saps|start|invoke-command|icm|python[\d.]*|py|php|ruby|uv|poetry|pipenv|pdm|hatch|rye|bundle|run|exec)$/;
 const LAUNCH_SWITCH = /^(?:\/[ck]|-[lc]+|-command|-noprofile|-nop|-nologo|-nol|-noninteractive|-noni|-nonewwindow|-wait|-passthru|-filepath|-scriptblock|-e|--exec|-m|-[\d.]+|-[uBEsSOIqX]|--)$/i;
 // A launcher's switch that takes the next word as its value: `wsl -d Ubuntu`, `pwsh -ExecutionPolicy Bypass`.
 const LAUNCH_VALUE = /^(?:-d|--distribution|--cd|-executionpolicy|-ep|-windowstyle|-workingdirectory)$/i;
@@ -1690,8 +2008,14 @@ const LAUNCH_VALUE = /^(?:-d|--distribution|--cd|-executionpolicy|-ep|-windowsty
 const RUN_VALUE = /^(?:-[evpwuhlm]|--(?:env|volume|publish|workdir|user|hostname|label|memory|name|network|net|entrypoint|env-file|mount|platform|add-host|cpus|restart|pull|cidfile|device|dns|expose|group-add|ipc|link|log-driver|pid|runtime|security-opt|shm-size|stop-signal|tmpfs|ulimit|uts))$/;
 
 // The client, console or shell a segment leaves open, or ''.
-function sessionClient(words) {
+function sessionClient(typed, inContainer = false) {
+  // Start-Process hands what it starts its -ArgumentList, a comma list or one quoted line: read as plain words
+  // (`Start-Process cmd -ArgumentList '/c','psql -U app'`).
+  const started = typed.some((word, index) => /^(?:start-process|saps)$/.test(commandName(word)) || (index === 0 && commandName(word) === 'start'));
+  const words = started ? typed.flatMap((word, index) => (ARG_LIST.test(word) ? [] : ARG_LIST.test(typed[index - 1] ?? '') ? word.split(/[\s,]+/).filter(Boolean) : [word])) : typed;
   const names = words.map(commandName);
+  // A container shell's command: an interpreter there is judged here (outside one, guard.mjs judges it).
+  if (inContainer && REPLS.test(names[0] ?? '')) return replOpen(names[0], words.slice(1));
   let at = 0;
   for (;;) {
     const before = at;
@@ -1710,15 +2034,20 @@ function sessionClient(words) {
   if (SESSION_CLIENTS.has(name)) return clientStaysOpen(name, rest) ? name : '';
   if (CONSOLES.has(name)) return consoleOpen(name, rest);
   if (!CONTAINER_RUNNERS.has(name)) return '';
-  // In a container: the first client, console or shell after `exec` / `run` that is no option's value. docker,
-  // podman and kubectl attach stdin only with -i; compose exec and run always do.
+  // `attach` hands the container's own process the terminal (kubectl only with -i), and `start -i` a stopped one's.
+  const stdinFlag = (word) => /^-[A-Za-z]*i[A-Za-z]*$/.test(word) || /^--(?:interactive|stdin)(?:=true)?$/.test(word);
+  const own = names.findIndex((word, index) => index > at && !words[index].startsWith('-') && !DOCKER_VALUE.test(words[index - 1]) && !/^(?:container|compose)$/.test(word));
+  if (names[own] === 'attach' && !words.includes('--no-stdin') && (!/^(?:kubectl|oc)$/.test(name) || words.slice(own + 1).some(stdinFlag))) return `${name} attach`;
+  if (names[own] === 'start' && /^(?:docker|podman|nerdctl)$/.test(name) && words.slice(own + 1).some(stdinFlag)) return `${name} start -i`;
+  // In a container: the first client, console, shell or interpreter after `exec` / `run` that is no option's value.
+  // docker, podman and kubectl attach stdin only with -i; compose exec and run always do.
   const verb = names.findIndex((word, index) => index > at && (word === 'exec' || word === 'run'));
   if (verb === -1) return '';
   const compose = /compose$/.test(name) || names.slice(at, verb).includes('compose');
   const interactive = compose || words.slice(verb + 1).some((word) => /^-[A-Za-z]*i[A-Za-z]*$/.test(word) || /^--(?:interactive|stdin)(?:=true)?$/.test(word));
   if (!interactive) return '';
   const inside = names.findIndex(
-    (word, index) => index > verb && (SESSION_CLIENTS.has(word) || CONTAINER_SHELLS.has(word) || CONSOLES.has(word)) && !/^-(?!-$)/.test(words[index - 1]),
+    (word, index) => index > verb && (SESSION_CLIENTS.has(word) || CONTAINER_SHELLS.has(word) || CONSOLES.has(word) || REPLS.test(word)) && !/^-(?!-$)/.test(words[index - 1]),
   );
   if (inside === -1) {
     // `docker run -it alpine` runs the image's own command, often a shell: one with nothing after the image.
@@ -1732,13 +2061,38 @@ function sessionClient(words) {
   }
   const after = words.slice(inside + 1);
   if (CONSOLES.has(names[inside])) return consoleOpen(names[inside], after);
+  if (REPLS.test(names[inside])) return replOpen(names[inside], after);
   if (CONTAINER_SHELLS.has(names[inside])) {
-    // `sh -c psql` runs the one word it is given: that word is judged as typed alone.
+    // `sh -c psql` or `sh -c "python -i x"` runs the command it is given: it is judged as typed alone in the container.
     const code = after.findIndex((word) => /^-(?:[A-Za-z]*c|command)$/i.test(word));
-    if (code !== -1 && after[code + 1] && !/\s/.test(after[code + 1])) return sessionClient([after[code + 1]]);
+    if (code !== -1 && after[code + 1]) return sessionClient(after[code + 1].trim().split(/\s+/), true);
     return after.some((word) => !word.startsWith('-') || /^-(?:[A-Za-z]*c|command|file|f|ec|encodedcommand)$/i.test(word)) ? '' : names[inside];
   }
   return clientStaysOpen(names[inside], after) ? names[inside] : '';
+}
+
+// Whether an interpreter in a container waits at its prompt: with nothing that hands it a script or code; with `-i`
+// (python, node) or `-a` (php) even then; behind `-m` a prompt module (`-m IPython`, `-m asyncio`); `deno repl`,
+// `bun repl`. One that runs a console's script or module is that console (`python manage.py shell`,
+// `python -m django shell`, `php artisan tinker`); a version or help check exits.
+const REPL_MODULES = /^(?:IPython|asyncio|code|ptpython|bpython)$/;
+function replOpen(name, after) {
+  if (after.some((word) => /^(?:--version|-V|-v|--help|-h|-\?)$/.test(word))) return '';
+  const node = /^(?:node|nodejs)$/.test(name);
+  if (after.some((word) => (/^(?:-i|--interactive)$/.test(word) && (node || /^python/.test(name))) || (name === 'php' && word === '-a'))) return name;
+  const valued = node ? /^(?:-r|--require|--import|--loader|--experimental-loader)$/ : /^(?:ruby|irb)$/.test(name) ? /^-[rI]$/ : REPL_VALUE;
+  const code = node ? /^(?:-e|-p|--eval|--print)$/ : name === 'php' ? /^-r$/ : /^(?:-c|-e)$/;
+  if (after.some((word) => code.test(word))) return '';
+  const module = after.indexOf('-m');
+  if (module !== -1) {
+    const named = after[module + 1] ?? '';
+    if (REPL_MODULES.test(named)) return `${name} -m ${named}`;
+    return CONSOLES.has(named) ? consoleOpen(named, after.slice(module + 2)) : '';
+  }
+  const script = after.findIndex((word, index) => !word.startsWith('-') && !valued.test(after[index - 1] ?? ''));
+  if (script === -1) return name === 'bun' ? '' : name;
+  if (/^(?:deno|bun)$/.test(name)) return after[script] === 'repl' ? `${name} repl` : '';
+  return CONSOLES.has(commandName(after[script])) ? consoleOpen(commandName(after[script]), after.slice(script + 1)) : '';
 }
 
 // A console's subcommand is its first plain word that is no option's value (`flask --app app shell`).
@@ -1774,6 +2128,8 @@ function clientStaysOpen(name, words) {
   switch (name) {
     case 'psql':
     case 'pgcli':
+      // `-f -` (or /dev/stdin) reads the statements from the terminal: the session stays open.
+      if (words.some((word, index) => (/^(?:-f|--file)$/.test(word) && /^(?:-|\/dev\/stdin)$/.test(words[index + 1] ?? '')) || /^(?:-f|--file=)(?:-|\/dev\/stdin)$/.test(word))) return true;
       return !(words.some((word) => clusterHas(word, 'cfl', 'dhLopPTUvFR')) || has(/^--(?:command|file|list)(?:=|$)|^-V$/));
     case 'mysql':
     case 'mariadb':
@@ -1832,12 +2188,132 @@ function checkCodeLiterals(code) {
 // A shell a quoted string is piped into runs it: PowerShell's `iex`, `Invoke-Expression`, `pwsh`, `powershell`, `cmd`.
 const PS_SHELL_READER = /(?:^|[\s;&|(\/])(?:iex|invoke-expression|pwsh|powershell|cmd)(?=[\s;&|)]|$)/i;
 
+// A .NET call, cast or object that opens the file it names: `[IO.File]::ReadAllText('.env')`,
+// `[IO.StreamReader]::new('.env')`, `([IO.StreamReader]'.env')`, `New-Object -TypeName System.IO.StreamReader '.env'`.
+const DOTNET_TYPE = String.raw`(?:System\.)?IO\.(?:File|FileInfo|StreamReader|StreamWriter|FileStream|BinaryReader)`;
+const DOTNET_FILE = new RegExp(String.raw`\[${DOTNET_TYPE}\]\s*(?:::(?:\w+|'\w+'|"\w+")\s*\([^)]*\)|'[^']*'|"[^"]*")|New-Object\b(?=[^;|\n)]*\b${DOTNET_TYPE}\b)[^;|\n)]*`, 'gi');
+function checkDotnet(text, cwd) {
+  for (const [call] of text.matchAll(DOTNET_FILE)) {
+    checkCodeLiterals(call);
+    // A path named bare, or inside a call of its own: `[IO.File]::ReadAllText((Resolve-Path .env))`.
+    const args = call.replace(/^\[[^\]]*\]\s*(?:::\w+\s*)?|^New-Object\b/i, '').split(/[\s,()]+/);
+    for (const word of args) {
+      const value = word.replace(/^-\w+:/, '').replace(/^['"]|['"]$/g, '');
+      if (value && !/^[-$]/.test(value) && !new RegExp(DOTNET_TYPE, 'i').test(value) && reachesFrom(value, cwd)) secretRefusal(value, 'read');
+    }
+  }
+}
+
+// What PowerShell reads in forms no reader names: the provider path `${C:\app\.env}` (a drive letter: `${env:TEMP}` is
+// a variable), and a FileInfo method on a listed item - `(Get-Item .env).OpenText()`, `((gi .env)).OpenText()`,
+// `(gci .e*)[0].OpenRead()`; its `.Delete()` and `.MoveTo()` remove the file.
+const FILEINFO = /\(\s*(?:\(\s*)?(?:get-item|gi|get-childitem|gci|dir|ls)\s([^()]*)\)\s*(?:\)\s*)?(?:\[\d+\]\s*)?\.(OpenText|OpenRead|OpenWrite|Open|CopyTo|Replace|Encrypt|Delete|MoveTo)\s*\(/gi;
+function checkPowerShellReads(text, cwd) {
+  checkDotnet(text, cwd);
+  for (const [, file] of text.matchAll(/\$\{([A-Za-z]:[^{}]*)\}/g)) if (reachesFrom(file, cwd)) secretRefusal(file, 'read');
+  for (const [, list, method] of text.matchAll(FILEINFO)) {
+    for (const word of list.trim().split(/[\s,]+/)) {
+      const file = word.replace(/^-\w+:/, '').replace(/^['"]|['"]$/g, '');
+      if (!file || file.startsWith('-')) continue;
+      const removes = /^(?:Delete|MoveTo)$/i.test(method);
+      if (removes && FROZEN_PATHS.length && mayHoldFrozen(file, cwd) && frozenAt(file, cwd)) frozenRefusal(file, 'delete or move');
+      if (!(reachesFrom(file, cwd) || globSecret(file, cwd, 'PowerShell'))) continue;
+      if (removes) secretDeleteRefusal(file);
+      secretRefusal(file, 'read');
+    }
+  }
+}
+
+// A quoted literal in parentheses or an array is that literal: `Get-Content ('.env')`, `gc(".env")`, `@('a'; '.env')`,
+// `-Path:('.env')`, `((".env"))`. Only quoted items (no `$`, no backtick), so `('.e' + 'nv')` and `(Join-Path ...)` stay
+// what they are, and a keyword's condition (`if ('x')`) is left alone.
+const PS_LITERAL = String.raw`(?:'[^']*'|"[^"$\x60]*")`;
+const PS_LITERAL_GROUP = new RegExp(
+  // The look-ahead first: the keyword test looks back over blanks, and only where a parenthesis follows.
+  String.raw`(^|[\s,:(;|=]|(?:^|[\s;|(])[A-Za-z][\w-]*)(?=@?\()(?<!(?:^|[^\w-])(?:if|elseif|while|switch|foreach|for|until|return|throw)\s{0,8})@?\(\s*,?\s*(${PS_LITERAL}(?:\s*[,;]\s*${PS_LITERAL})*)\s*\)`,
+  'g',
+);
+// A lone variable in parentheses is that variable: `-ComputerName ($env:COMPUTERNAME)`.
+const PS_VARIABLE_GROUP = /(^|[\s,:(;|=]|(?:^|[\s;|(])[A-Za-z][\w-]*)(?=@?\()(?<!(?:^|[^\w-])(?:if|elseif|while|switch|foreach|for|until|return|throw)\s{0,8})@?\(\s*(\$(?:\{[^{}]*\}|[\w:]+))\s*\)/g;
+function literalGroups(text) {
+  let out = text;
+  for (let pass = 0; pass < 5; pass += 1) {
+    const next = out
+      .replace(PS_LITERAL_GROUP, (whole, before, list) => `${before} ${[...list.matchAll(new RegExp(PS_LITERAL, 'g'))].map((item) => item[0]).join(',')}`)
+      .replace(PS_VARIABLE_GROUP, '$1 $2');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+// A parenthesised group inside a PowerShell command is one of its arguments, not the end of the command:
+// `Get-Content -TotalCount (10) .env`, `Remove-Item -Force:(1) .envrc`. A group in an argument position - after a
+// blank, a comma, a colon or `=`, with a word before it in its statement, and not a keyword's condition - is pulled
+// out and judged as a command of its own, and one placeholder word stays in its place, as a `$(...)` does.
+const PS_KEYWORD_PAREN = /(?:^|[^\w-])(?:if|elseif|while|switch|foreach|for|until|catch|param|function|filter|trap|data)\s*$/i;
+function parenGroups(command) {
+  // Every parenthesis outside a quote and its partner, found in one pass: a long command may hold thousands.
+  const partner = new Map();
+  const open = [];
+  for (let index = 0, quote = ''; index < command.length; index += 1) {
+    const ch = command[index];
+    if (quote) {
+      if (quote === '"' && ch === '`') index += 1;
+      else if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(') open.push(index);
+    else if (ch === ')' && open.length) partner.set(open.pop(), index);
+  }
+  const bodies = [];
+  // What is kept, one character or placeholder per entry: read backwards without copying it.
+  const outer = [];
+  let quote = '';
+  for (let index = 0; index < command.length; index += 1) {
+    const ch = command[index];
+    if (quote) {
+      outer.push(ch);
+      if (quote === '"' && ch === '`' && index + 1 < command.length) {
+        index += 1;
+        outer.push(command[index]);
+      } else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === '(' && partner.has(index)) {
+      const end = outer.at(-1) === '@' ? outer.length - 1 : outer.length;
+      let word = end - 1;
+      while (word >= 0 && /^\s$/.test(outer[word])) word -= 1;
+      const opensStatement = word < 0 || /^[;|{}\n&(]$/.test(outer[word]);
+      if (/^[\s,:=]$/.test(outer[end - 1] ?? '') && !opensStatement && !PS_KEYWORD_PAREN.test(outer.slice(Math.max(0, end - 40), end).join(''))) {
+        bodies.push(command.slice(index + 1, partner.get(index)));
+        outer.length = end;
+        outer.push('__sub__');
+        index = partner.get(index);
+        continue;
+      }
+    }
+    outer.push(ch);
+  }
+  return { outer: outer.join(''), bodies };
+}
+
 function checkCommand(command, shell, cwd, depth) {
   let text = command;
   if (shell === 'PowerShell') {
     text = hereStringsQuoted(text, cwd, depth);
     // `-ArgumentList @('apply','-auto-approve')` is the list `'apply','-auto-approve'`.
     text = text.replace(/(\s)(-\w+)(\s+)@\(([^()]*)\)/g, (whole, space, flag, gap, list) => (ARG_LIST.test(flag) ? `${space}${flag}${gap}${list}` : whole));
+    text = literalGroups(text);
+    // `(gci).ForEach({ ... })` and `.Where({ ... })` hand the block each item, as a pipe into `% { ... }` does.
+    text = text.replace(/\(([^()]*)\)\s*\.(?:ForEach|Where)\(\s*\{/gi, '$1 | % {');
+    checkPowerShellReads(text, cwd);
+    const groups = parenGroups(text);
+    for (const body of groups.bodies) {
+      if (depth < MAX_DEPTH) checkCommand(body, shell, cwd, depth + 1);
+      else tooDeep();
+    }
+    text = groups.outer;
   } else if (depth === 0) text = withoutHeredocs(text);
   const { outer, bodies } = withoutSubstitutions(text, shell);
   for (const body of bodies) {
@@ -1847,7 +2323,7 @@ function checkCommand(command, shell, cwd, depth) {
   noteDockerAssignments(outer);
   noteDatabaseAssignments(outer);
   // A .NET file call reads or writes the path it names: `[IO.File]::ReadAllText('.env')`.
-  for (const [call] of outer.matchAll(/\[(?:System\.)?IO\.File\]::\w+\s*\([^)]*\)/gi)) checkCodeLiterals(call);
+  if (shell !== 'PowerShell') checkDotnet(outer, cwd);
   // `< file` feeds the file to whatever reads stdin; `<<` is a heredoc and `<(` a process substitution. A quoted
   // string with a space in it is a statement or a message, where `<` compares.
   const unquoted = outer.replace(/"[^"]*\s[^"]*"|'[^']*\s[^']*'/g, '""');
@@ -1869,7 +2345,7 @@ function checkCommand(command, shell, cwd, depth) {
     if (depth < MAX_DEPTH) checkCommand(body.trim().replace(/^(["'])(.*)\1$/s, '$2'), runner, cwd, depth + 1);
     else tooDeep();
   }
-  const segments = segmentsOf(outer, shell);
+  const segments = segmentsOf(outer, shell).map((words) => colonValues(bracesSplit(words, shell), shell));
   segments.forEach((words, index) => checkSegment(words, shell, cwd, depth, words.piped ? segments[index - 1] : undefined));
 }
 
