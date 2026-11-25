@@ -93,7 +93,7 @@ const ruled = mkdtempSync(join(tmpdir(), 'guard-rules-'));
 const ruledAll = mkdtempSync(join(tmpdir(), 'guard-rules-all-'));
 mkdirSync(join(ruled, '.ai-layer', 'rules'), { recursive: true });
 mkdirSync(join(ruledAll, '.ai-layer', 'rules'), { recursive: true });
-writeFileSync(join(ruled, '.ai-layer', 'rules', 'forms.md'), "---\r\npaths:\r\n  - 'app/**/*.{ts,tsx}'\r\n  - \"*.form.json\"\r\n---\r\nrule text\r\n");
+writeFileSync(join(ruled, '.ai-layer', 'rules', 'forms.md'), "---\r\npaths:\r\n  - 'app/**/*.{ts,tsx}'\r\n  - \"*.form.json\"\r\n  - 'schemas/**' # a comment after a quoted glob\r\n  - docs/** # and after a bare one\r\n  - gen/**#x\r\n---\r\nrule text\r\n");
 writeFileSync(join(ruledAll, '.ai-layer', 'rules', 'always.md'), '# no frontmatter\n');
 const formPatch = P(patch('*** Add File: app/forms/Login.tsx', '+x'));
 
@@ -130,6 +130,10 @@ const codexCases = [
   ['patch: a hook named from inside .codex (deny)', 'deny', P(patch('*** Update File: hooks/guard.mjs', '@@', '+x'), { cwd: inRoot('.codex') })],
   ['patch: a skill file (allow)', 'allow', P(patch('*** Update File: .agents/skills/debug/SKILL.md', '@@', '+x'))],
   ['patch: a run-time layer file (allow)', 'allow', P(patch('*** Add File: .ai-layer/handoff.md', '+x'))],
+  // A move brings a file in unread: its lines were never in a patch.
+  ['patch: a move in from outside the project (deny)', 'deny', P(patch(`*** Update File: ${join(temp, 'gen.ts')}`, `*** Move to: ${SRC}/gen.ts`)), { reason: /from outside it/ }],
+  ['patch: a move between two paths outside (allow)', 'allow', P(patch(`*** Update File: ${join(temp, 'a.ts')}`, `*** Move to: ${join(temp, 'b.ts')}`))],
+  ['patch: a move inside the project (allow)', 'allow', P(patch(`*** Update File: ${SRC}/a.ts`, `*** Move to: ${SRC}/b.ts`))],
   // The write fence by agent type: Codex agents have no tool list, so this is what keeps a reviewer read-only.
   ['hunt: add its probe (allow)', 'allow', P(patch(`*** Add File: ${SRC}/__hunt_probe.ts`, '+x'), as('hunt'))],
   ['hunt: update a source file (deny)', 'deny', P(patch(`*** Update File: ${SRC}/App.ts`, '@@', '+x'), as('hunt')), { reason: /hunt may write or remove only its compile probe/ }],
@@ -165,6 +169,10 @@ const codexCases = [
   ['rules: a slash-less glob at any depth (deny)', 'deny', P(patch('*** Add File: data/x/a.form.json', '+{}'), as('other')), { project: ruled }],
   ['rules: a path no rule reaches (allow)', 'allow', P(patch('*** Add File: lib/app.ts', '+x'), as('third')), { project: ruled }],
   ['rules: a delete reads no rule (allow)', 'allow', P(patch('*** Delete File: app/forms/Old.tsx'), as('third')), { project: ruled }],
+  ['rules: a quoted glob with a comment after it (deny)', 'deny', P(patch('*** Add File: schemas/a.json', '+{}'), as('fourth')), { project: ruled }],
+  ['rules: a bare glob with a comment after it (deny)', 'deny', P(patch('*** Add File: docs/a.md', '+x'), as('fifth')), { project: ruled }],
+  ['rules: a # inside a glob is part of it (allow)', 'allow', P(patch('*** Add File: gen/a.ts', '+x'), as('sixth')), { project: ruled }],
+  ['rules: a file moved out of a ruled folder (deny)', 'deny', P(patch('*** Update File: app/forms/Old.tsx', '*** Move to: lib/Old.tsx'), as('seventh')), { project: ruled, reason: /forms\.md/ }],
   ['rules: a compaction (allow)', 'allow', { hook_event_name: 'SessionStart', source: 'compact' }, { project: ruled }],
   ['rules: the first patch after it (deny)', 'deny', formPatch, { project: ruled }],
   ['rules: no session id, context instead (context)', 'context', { ...formPatch, session_id: undefined }, { project: ruled, reason: /forms\.md/ }],
@@ -200,6 +208,14 @@ for (const [name, want, payload, { hook = guard, project = root, env, reason } =
   if (ok) passed += 1;
   else failed += 1;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${'--rules-for lists the rule files for a path'.padEnd(44)} exit ${r.status}  ${r.stdout.trim().slice(0, 60)}`);
+}
+{
+  // Asked without the switch it must not print nothing, which would read as "no rules".
+  const r = spawnSync(process.execPath, [guard, '--rules-for', 'app/forms/Login.tsx'], { cwd: ruled, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: ruled } });
+  const ok = r.status === 0 && r.stdout.trim() === '.ai-layer/rules/forms.md';
+  if (ok) passed += 1;
+  else failed += 1;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${'--rules-for without the switch still answers'.padEnd(44)} exit ${r.status}  ${r.stdout.trim().slice(0, 60)}`);
 }
 for (const folder of [ruled, ruledAll, markers]) rmSync(folder, { recursive: true, force: true });
 rmSync(copies, { recursive: true, force: true });

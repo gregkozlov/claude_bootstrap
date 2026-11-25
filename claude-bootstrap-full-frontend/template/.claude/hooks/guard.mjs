@@ -27,8 +27,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The Codex switch: `--harness codex` or `--harness=codex`. Stderr reaches nobody there, so a list that failed to parse
-// is kept in LIST_ERROR and refuses every call until it is fixed.
-const CODEX = process.argv.slice(2).some((arg, index, args) => /^--harness=codex$/i.test(arg) || (arg === '--harness' && /^codex$/i.test(args[index + 1] ?? '')));
+// is kept in LIST_ERROR and refuses every call until it is fixed. `--rules-for` is that form's own question, so it
+// sets the switch too: asked without the flag it would print nothing, which reads as "no rules".
+const CODEX = process.argv.slice(2).some((arg, index, args) => /^--harness=codex$/i.test(arg) || arg === '--rules-for' || (arg === '--harness' && /^codex$/i.test(args[index + 1] ?? '')));
 // Under Codex no variable carries the project root and the cwd may be a subfolder: the root is where this file is installed.
 const HOOK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 let LIST_ERROR;
@@ -197,6 +198,16 @@ const CODEX_FENCED_AGENTS = new Map([
 // Under Codex path-scoped rules are the guard's own: the rule files, and where it notes which ones a session was shown.
 const RULES_DIR = '.ai-layer/rules';
 const RULE_MARKERS = path.join(os.tmpdir(), 'ai-layer-rules');
+// Under Codex a patch can also be handed to the shell, where no check below can read it: the tool's name as a word
+// a shell runs, behind a launcher or a nested shell too, and its name anywhere in code an interpreter runs.
+const PATCH_REFUSAL = 'Blocked by .claude/hooks/guard.mjs: a patch sent through the shell, which this guard cannot read. Send it with the apply_patch tool itself.';
+const PATCH_WORD = /^(?:(?:.*[\\/])?(?:apply_patch|applypatch)(?:\.(?:exe|cmd|bat|ps1|sh))?|--codex-run-as-apply-patch)$/i;
+const PATCH_IN_CODE = /\b(?:apply_patch|applypatch)\b/i;
+// Under Codex what is typed into a running command reaches no hook, so a shell or an interpreter left open is refused.
+const SESSION_TOOL = /^(?:pwsh|powershell|bash|sh|zsh|dash|ksh|cmd|node|python[\d.]*|py|ruby|irb|perl|php|deno|bun)$/i;
+const SESSION_TAKES_FLAGS = /^(?:pwsh|powershell|bash|sh|zsh|dash|ksh|cmd|node|python[\d.]*|py)$/i;
+const SESSION_NEUTRAL = /^(?:-i|-l|--login|--interactive|-NoLogo|-NoProfile|-NoExit|-NonInteractive|-q|\/\/?[dDqQ])$/i;
+const CMD_STAYS_OPEN = /(?:^|[\s;&|(])(?:[^\s;&|(]*[\\/])?cmd(?:\.exe)?(?:\s+\/\/?[a-zA-Z](?::\S*)?)*\s+\/\/?[kK](?=\s|$)/i;
 const MAX_BODY_DEPTH = 3;
 const GIT_REFUSAL =
   'Blocked by .claude/hooks/guard.mjs: this git verb commits, stages, publishes, rewrites or discards work. CLAUDE.md: apply file changes only and leave them in the working tree - the author commits.';
@@ -528,12 +539,26 @@ function normalizeGit(text) {
     .replace(/\bgit\.exe\b/gi, 'git');
 }
 
+// A program named by its full path or with its `.exe` / `.com` suffix is the same program: `rm.exe`, `/usr/bin/rm`,
+// `C:/Windows/System32/cmd.exe`, `\rm`. A relative path keeps its spelling: `./install` is a project script.
+const bareName = (token) =>
+  /^(?:[A-Za-z]:)?[\\/]/.test(token) || /\.(?:exe|com)$/i.test(token) ? token.replace(/^.*[\\/]/, '').replace(/\.(?:exe|com)$/i, '') : token;
+
+// Only a word with something after it, naming a mover, a downloader, a directory changer, `cmd` or a wrapper, is read
+// by its bare name: a quoted path that merely opens a segment (`Test-Path ('C:/x/rm.exe')`) is not a command.
+function bareCommand(tokens, start) {
+  const name = bareName(tokens[start]);
+  if (name === tokens[start] || tokens.length <= start + 1) return tokens[start];
+  return MOVER.test(name) || DOWNLOADER.test(name) || CHDIR.test(name) || /^cmd$/i.test(name) || Object.hasOwn(WRAPPER_VALUE_FLAGS, name) ? name : tokens[start];
+}
+
 function stripLeading(input) {
   const tokens = [...input];
   let start = 0;
   for (;;) {
+    if (tokens[start] === undefined) break;
+    tokens[start] = bareCommand(tokens, start);
     const token = tokens[start];
-    if (token === undefined) break;
     const glued = /^\$[\w:]+=(.+)$/.exec(token);
     const wrapper = Object.hasOwn(WRAPPER_VALUE_FLAGS, token) ? WRAPPER_VALUE_FLAGS[token] : undefined;
     if (token === 'command' && /^-[vV]$/.test(tokens[start + 1] ?? '')) break;
@@ -931,7 +956,7 @@ function checkMovers(segment, context) {
     }
   }
   const xargs = tokens.findIndex((token) => /^xargs$/i.test(token));
-  if (xargs >= 0 && tokens.slice(xargs + 1).some((token) => MOVER.test(token))) {
+  if (xargs >= 0 && tokens.slice(xargs + 1).some((token) => MOVER.test(bareName(token)))) {
     deny('Blocked by .claude/hooks/guard.mjs: a mover behind xargs, whose targets cannot be judged. CLAUDE.md, Shell and file edits: a repo file is changed with Edit or Write, and an orphaned file is deleted one path at a time.');
   }
   if (!MOVER.test(tokens[0]) && !DOWNLOADER.test(tokens[0])) return;
@@ -982,7 +1007,7 @@ function checkFind(command, shell) {
   for (const match of unquoted(command, shell).matchAll(/(?:^|[\s;&|(])(?:[^\s;&|(]*[\\/])?find(\s[^|;&\n]*)/g)) {
     const start = match.index + match[0].length - match[1].length;
     const rest = command.slice(start, start + match[1].length);
-    if (!/\s-delete\b|\s-exec(?:dir)?\s+["']?(?:rm|del|Remove-Item|unlink|shred)\b/i.test(` ${rest}`)) continue;
+    if (!/\s-delete\b|\s-exec(?:dir)?\s+["']?(?:[^\s"']*[\\/])?(?:rm|del|Remove-Item|unlink|shred)\b/i.test(` ${rest}`)) continue;
     const roots = [];
     for (const token of tokenize(rest, shell)) {
       if (/^[-(!]/.test(token)) break;
@@ -1059,8 +1084,13 @@ function checkChdir(command, shell) {
     }
   }
   for (const piece of pieces) {
-    if (shell === 'Bash' && piece.depth > 0) continue;
+    // Under Codex nothing persists between calls, but the paths after a `cd` are judged from the folder before it:
+    // a subshell is no exemption there, and the call's own working directory is the way to run somewhere else.
+    if (shell === 'Bash' && piece.depth > 0 && !CODEX) continue;
     const head = stripLeading(tokenize(piece.text.trim(), shell))[0] ?? '';
+    if (CODEX && CHDIR.test(head)) {
+      deny(`Blocked by .claude/hooks/guard.mjs: "${head}" changes the working directory inside this command, so the paths after it cannot be judged. Retry with the call's working directory set to that folder, or with absolute paths, git -C <tree> or npm --prefix <tree> run ... (CLAUDE.md, Shell and file edits.)`);
+    }
     if (CHDIR.test(head)) {
       const retry =
         shell === 'Bash'
@@ -1128,6 +1158,29 @@ function heredocBodiesBlanked(command, shell, quotedOnly = false) {
   return pending.length > 0 || SHELL_READER.test(blanked) ? command : blanked;
 }
 
+// A shell or interpreter started with nothing to run, or told to stay open: `pwsh`, `bash -i`, `node`, `python -i x.py`,
+// `pwsh -NoExit -Command ...`, `deno repl`. One that gets code, a script or a query flag (`node --version`) is not.
+function interactiveSession(words) {
+  const name = toolName(words[0]);
+  if (!SESSION_TOOL.test(name)) return false;
+  const own = [];
+  for (let index = 1; index < words.length; index += 1) {
+    if (REDIRECT_TOKEN.test(words[index])) {
+      if (/^(?:\d|\*|&)?(?:>{1,2}\|?|>&|<)$/.test(words[index])) index += 1;
+    } else if (/^-ExecutionPolicy$/i.test(words[index])) index += 1;
+    else own.push(words[index]);
+  }
+  if (own.length === 0) return true;
+  const operand = own.findIndex((word) => !/^(?:-|\/\/?[A-Za-z](?::\S*)?$)/.test(word));
+  const flags = operand < 0 ? own : own.slice(0, operand);
+  if (/^(?:pwsh|powershell)$/i.test(name) && flags.some((flag) => /^-NoExit$/i.test(flag))) return true;
+  if (/^php$/i.test(name) && flags.includes('-a')) return true;
+  if (/^(?:node|deno|bun)$/i.test(name) && /^(?:repl|inspect)$/.test(own[operand] ?? '')) return true;
+  if (!SESSION_TAKES_FLAGS.test(name)) return false;
+  if (!/^cmd$/i.test(name) && flags.some((flag) => /^(?:-i|--interactive)$/.test(flag))) return true;
+  return own.every((word) => SESSION_NEUTRAL.test(word));
+}
+
 function checkCommand(command, context, depth = 0) {
   if (typeof command !== 'string') return;
   // Arithmetic `$(( $a > b ))` compares, it does not redirect; one holding a `$(` or a backtick keeps being checked.
@@ -1170,7 +1223,15 @@ function checkCommand(command, context, depth = 0) {
     const readGit = !substitution && !INTERPRETER_ONE_LINER.test(segment) && GIT_READ_VERBS.has(firstGitVerb(segment, context.shell) ?? '');
     const words = commandWords(segment, context.shell);
     // A search's pattern, a read git verb's quoted argument and a quoted argument nothing runs are text, not commands.
-    const text = search || readGit || !(substitution || fed || quotedRuns(segment, words)) ? unquoted(segment, context.shell) : segment;
+    const runs = !search && !readGit && (substitution || fed || quotedRuns(segment, words));
+    const text = runs ? segment : unquoted(segment, context.shell);
+    if (CODEX) {
+      // A search's words are patterns and paths; everywhere else the tool's name as a word is the tool being run.
+      if (!search && !readGit && (words.some((word) => PATCH_WORD.test(word)) || (runs && PATCH_IN_CODE.test(segment)))) deny(PATCH_REFUSAL);
+      if (!stdinScript && (interactiveSession(words) || CMD_STAYS_OPEN.test(unquoted(segment, context.shell)))) {
+        deny(`Blocked by .claude/hooks/guard.mjs: "${words[0] ?? 'cmd'}" here opens an interactive session, and what is typed into one never reaches this guard. Run the command or the script itself.`);
+      }
+    }
     if (!search) {
       if (gitWrites(segment, context.shell)) deny(GIT_REFUSAL);
       if (ghWrites(text)) {
@@ -1533,6 +1594,11 @@ function checkPatch(text, context) {
     deny('Blocked by .claude/hooks/guard.mjs: no `*** Add File:`, `*** Update File:` or `*** Delete File:` header was found in this patch, so it cannot be judged. Send the patch in that form.');
   }
   const inside = (target) => insideProject(target, context.cwd);
+  for (const op of ops) {
+    if (op.moveTo !== undefined && inside(op.moveTo) && !inside(op.path)) {
+      deny(`Blocked by .claude/hooks/guard.mjs: this patch moves "${op.path}" into the project from outside it, a file this guard has not read. Add it with \`*** Add File\` instead.`);
+    }
+  }
   const written = ops.filter((op) => op.kind !== 'delete').map((op) => ({ target: op.moveTo ?? op.path, plain: op.kind === 'update' && op.moveTo === undefined }));
   const removed = ops.filter((op) => op.kind === 'delete' || op.moveTo !== undefined).map((op) => op.path);
   for (const { target, plain } of written) {
@@ -1571,7 +1637,8 @@ function checkPatch(text, context) {
       }
     }
   }
-  return projectWrites;
+  // A file moved out of a ruled folder is still an edit of that folder: its old path brings its rules too.
+  return [...projectWrites, ...ops.filter((op) => op.moveTo !== undefined && inside(op.path)).map((op) => op.path)];
 }
 
 function expandBraces(glob) {
@@ -1630,7 +1697,9 @@ function loadRules(root) {
     const globs = [];
     for (const line of at < 0 ? [] : lines.slice(at + 1)) {
       if (/^[^\s#-]/.test(line)) break;
-      const item = /^\s*-\s+(['"]?)(.+?)\1\s*$/.exec(line)?.[2];
+      // A quoted item is its quoted text; a YAML comment may follow either form after whitespace.
+      const read = /^\s*-\s+(?:(['"])(.+?)\1|([^'"\s].*?))(?:\s+#.*)?\s*$/.exec(line);
+      const item = read?.[2] ?? read?.[3];
       if (item) globs.push(item);
     }
     return [{ file: `${RULES_DIR}/${file}`, marker: file.replace(/[^\w.-]/g, '_'), globs: globs.length > 0 ? globs : undefined }];
@@ -1706,6 +1775,11 @@ function codexCall(payload) {
   const input = payload.tool_input ?? {};
   const workdir = [input.workdir, input.cwd].find((value) => typeof value === 'string' && value);
   const fence = CODEX_FENCED_AGENTS.get(payload.agent_type);
+  // The caller's type is the payload's own `agent_type`; the one in `tool_input` is the child's.
+  if (typeof tool === 'string' && /(?:spawn_agent|followup_task)$/.test(tool)) {
+    if (fence) deny(`Blocked by .claude/hooks/guard.mjs: ${payload.agent_type} is fenced here, and an agent it starts or hands work to would not be: it does its task itself.`);
+    return;
+  }
   const context = {
     cwd: workdir ? path.resolve(payload.cwd || process.cwd(), nativePath(workdir)) : payload.cwd,
     shell: codexShell(tool, input.shell),
@@ -1719,9 +1793,13 @@ function codexCall(payload) {
     const { shell } = context;
     const typed = typeof input.command === 'string' ? input.command : Array.isArray(input.command) ? commandLine(input.command, shell) : undefined;
     if (typed === undefined) return;
-    // First, so its own reason is the one given: a patch through the shell is a write no check below can read.
-    if (segments(typed, shell).some((segment) => /^(?:apply_patch|applypatch)$/i.test(toolName(commandWords(segment, shell)[0])))) {
-      deny('Blocked by .claude/hooks/guard.mjs: a patch sent through the shell, which this guard cannot read. Send it with the apply_patch tool itself.');
+    // First, so its own reason is the one given: a patch through the shell is a write no check below can read. The
+    // patch text beside the tool's name is read raw, since an apostrophe in a patch line unbalances every quote after it.
+    if (
+      (typed.includes('*** Begin Patch') && PATCH_IN_CODE.test(typed)) ||
+      segments(typed, shell).some((segment) => /^(?:apply_patch|applypatch)$/i.test(toolName(commandWords(segment, shell)[0])))
+    ) {
+      deny(PATCH_REFUSAL);
     }
     const command = withLeadingLiterals(withMktempNames(typed, shell), shell);
     for (const view of new Set([command, commentsBlanked(command, shell)])) {
